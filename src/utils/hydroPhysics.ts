@@ -205,7 +205,7 @@ export function calculateDynamicRiskIndex(
   const rainScore = Math.min(100, Math.max(0, (rainIntensityMmHr / 70) * 100));
 
   const compositeDRI = (0.35 * satScore) + (0.20 * instabilityScore) + (0.25 * dischargeScore) + (0.20 * rainScore);
-  const dri = Math.round(Math.min(100, Math.max(0, compositeDRI)));
+  let dri = Math.round(Math.min(100, Math.max(0, compositeDRI)));
 
   let hazardTier: HazardTier = 'NORMAL';
   if (dri >= 80 || fos < 1.05 || dischargeRatio >= 1.0) {
@@ -214,6 +214,12 @@ export function calculateDynamicRiskIndex(
     hazardTier = 'WARNING';
   } else if (dri >= 40 || fos < 1.30 || dischargeRatio >= 0.50) {
     hazardTier = 'ADVISORY';
+  }
+
+  // Consistent Dynamic Risk Index (DRI) vs. Priority 1 Red Alert:
+  // Whenever fos <= 1.05 or a Stage-3 evacuation is triggered (CRITICAL), boost DRI to at least 86 / 100
+  if (hazardTier === 'CRITICAL' || fos <= 1.05 || dischargeRatio >= 1.0) {
+    dri = Math.max(86, dri);
   }
 
   return { dri, hazardTier };

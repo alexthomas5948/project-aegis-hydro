@@ -388,7 +388,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
                 <div class="grid grid-cols-2 gap-x-3 text-[11px] pt-1">
                   <div>Slope: <span class="text-amber-400 font-mono">${props.slopeDeg}°</span></div>
                   <div>Elevation: <span class="text-cyan-300 font-mono">${props.elevationM}m</span></div>
-                  <div>Slope FoS: <span class="${props.factorOfSafety < 1.15 ? 'text-red-400 font-bold' : 'text-emerald-400'} font-mono">${props.factorOfSafety}</span></div>
+                  <div>Slope FoS: <span class="${props.factorOfSafety < 1.15 ? 'text-red-400 font-bold' : 'text-emerald-400'} font-mono">${Number(props.factorOfSafety).toFixed(2)}</span></div>
                   <div>Saturation: <span class="text-cyan-400 font-mono">${props.saturationPct}%</span></div>
                 </div>
                 ${props.isLandslideRisk ? '<div class="text-[10px] text-red-400 font-bold mt-1 animate-pulse">CRITICAL LANDSLIDE / DEBRIS-DAM RISK</div>' : ''}

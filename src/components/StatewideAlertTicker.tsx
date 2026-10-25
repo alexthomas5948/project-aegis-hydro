@@ -17,7 +17,7 @@ export const StatewideAlertTicker: React.FC<StatewideAlertTickerProps> = ({ tele
 
     if (state.physics.hazardTier === 'CRITICAL') {
       alerts.push(
-        `🚨 RED ALERT [${c.name.toUpperCase()}]: Upstream FoS ${state.physics.factorOfSafety} breached. River Discharge ${state.downstream.dischargeM3s} m³/s. Inundation radius ${state.downstream.inundationRadiusKm}km active at ${c.downstreamNode.name}. Crest ETA: T-${Math.floor(state.physics.floodCrestEtaMinutes / 60)}h ${state.physics.floodCrestEtaMinutes % 60}m.`
+        `🚨 RED ALERT [${c.name.toUpperCase()}]: Upstream FoS ${state.physics.factorOfSafety.toFixed(2)} breached. River Discharge ${state.downstream.dischargeM3s} m³/s. Inundation radius ${state.downstream.inundationRadiusKm}km active at ${c.downstreamNode.name}. Crest ETA: T-${Math.floor(state.physics.floodCrestEtaMinutes / 60)}h ${state.physics.floodCrestEtaMinutes % 60}m.`
       );
     } else if (state.physics.hazardTier === 'WARNING') {
       alerts.push(
@@ -25,7 +25,7 @@ export const StatewideAlertTicker: React.FC<StatewideAlertTickerProps> = ({ tele
       );
     } else {
       alerts.push(
-        `🟢 NOMINAL [${c.name}]: Baseflow ${state.downstream.dischargeM3s} m³/s, Slope FoS ${state.physics.factorOfSafety}.`
+        `🟢 NOMINAL [${c.name}]: Baseflow ${state.downstream.dischargeM3s} m³/s, Slope FoS ${state.physics.factorOfSafety.toFixed(2)}.`
       );
     }
   }

@@ -197,11 +197,15 @@ export const EmergencyVoiceDispatchModal: React.FC<EmergencyVoiceDispatchModalPr
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-xs font-mono">
           <div className="p-2 rounded bg-slate-900/90 border border-slate-800">
             <div className="text-slate-400 text-[10px] uppercase">DYNAMIC RISK INDEX</div>
-            <div className="text-xl font-rajdhani font-bold text-red-400">{alert.dri} / 100</div>
+            <div className="text-xl font-rajdhani font-bold text-red-400">
+              {Math.max(alert.hazardTier === 'CRITICAL' || alert.fos <= 1.05 ? 86 : alert.dri, alert.dri)} / 100
+            </div>
           </div>
           <div className="p-2 rounded bg-slate-900/90 border border-slate-800">
             <div className="text-slate-400 text-[10px] uppercase">SLOPE STABILITY FoS</div>
-            <div className="text-xl font-rajdhani font-bold text-red-400">{alert.fos} (CRITICAL)</div>
+            <div className="text-xl font-rajdhani font-bold text-red-400">
+              {(typeof alert.fos === 'number' ? alert.fos : Number(alert.fos)).toFixed(2)} (CRITICAL)
+            </div>
           </div>
           <div className="p-2 rounded bg-slate-900/90 border border-slate-800">
             <div className="text-slate-400 text-[10px] uppercase">CREST ARRIVAL ETA</div>

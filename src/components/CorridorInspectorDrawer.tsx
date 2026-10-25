@@ -151,7 +151,7 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
           <div className={`text-xl font-rajdhani font-bold mt-1 ${
             physics.factorOfSafety < 1.15 ? 'text-red-400 font-extrabold' : 'text-emerald-400'
           }`}>
-            {physics.factorOfSafety}
+            {physics.factorOfSafety.toFixed(2)}
             <span className="text-[10px] font-mono font-normal ml-1 text-slate-400">
               {physics.factorOfSafety < 1.15 ? 'CRITICAL SLIP' : 'STABLE'}
             </span>
@@ -412,7 +412,7 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
             <div className="text-cyan-400 font-bold uppercase flex items-center justify-between">
               <span>1. Infinite Slope Stability (FoS)</span>
               <span className={physics.factorOfSafety < 1.15 ? 'text-red-400 font-bold' : 'text-emerald-400'}>
-                FoS = {physics.factorOfSafety}
+                FoS = {physics.factorOfSafety.toFixed(2)}
               </span>
             </div>
             <div className="p-2 bg-[#060a12] rounded border border-slate-900 text-[11px] text-slate-300">
