@@ -239,6 +239,11 @@ export interface HydroPhysicsCalculations {
   iversonPDE: IversonPDEResult;
   muskingumCunge: MuskingumCungeWaveResult;
   damOptimizer?: DamSpillwayOptimizerResult;
+
+  // Wave Celerity & Transit metrics
+  waveCelerityMs?: number;
+  waveCelerityKmh?: number;
+  courantNumber?: number;
 }
 
 export interface HourlyForecastPoint {

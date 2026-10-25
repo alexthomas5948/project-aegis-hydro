@@ -128,13 +128,20 @@ export const CorridorCardsGrid: React.FC<CorridorCardsGridProps> = ({
                 </div>
               </div>
 
-              {/* Bottom ETA & Location Footer */}
+              {/* Bottom ETA & Location Footer (UPGRADE 2: Realistic Transit Time vs Active Alert ETA) */}
               <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
-                <span className="text-slate-400 truncate max-w-[90px]">{corridor.downstreamNode.name.split('/')[0]}</span>
-                <span className="text-red-400 font-bold flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  T-{etaStr}
-                </span>
+                <span className="text-slate-400 truncate max-w-[80px]">{corridor.downstreamNode.name.split('/')[0]}</span>
+                {physics.dynamicRiskIndex < 50 && physics.factorOfSafety >= 1.05 && !isCritical ? (
+                  <span className="text-cyan-300 font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-950/50 border border-cyan-500/40" title="Calm Baseline Hydraulic Transit Time">
+                    <Clock className="w-3 h-3 text-cyan-400" />
+                    <span>TRANSIT BASELINE: ~{etaStr} (NOMINAL)</span>
+                  </span>
+                ) : (
+                  <span className="text-red-400 font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-950/60 border border-red-500/60 animate-pulse" title="Active Flood Crest Wave Arrival ETA">
+                    <Clock className="w-3 h-3 text-red-400" />
+                    <span>CREST ETA: T-{etaStr}</span>
+                  </span>
+                )}
               </div>
             </div>
           );

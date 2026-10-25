@@ -12,7 +12,8 @@ import {
   Volume2,
   VolumeX,
   Zap,
-  Smartphone
+  Smartphone,
+  FileText
 } from 'lucide-react';
 import { telemetryEngine } from '../services/keralaTelemetryEngine';
 import { voiceDispatchEngine } from '../services/voiceDispatchEngine';
@@ -26,6 +27,7 @@ interface CommandTopbarProps {
   hasCriticalAlert: boolean;
   isHILConnected?: boolean;
   roomPin?: string;
+  onOpenSitrep?: () => void;
 }
 
 export const CommandTopbar: React.FC<CommandTopbarProps> = ({
@@ -35,7 +37,8 @@ export const CommandTopbar: React.FC<CommandTopbarProps> = ({
   onOpenPairingModal,
   hasCriticalAlert,
   isHILConnected = false,
-  roomPin = '4092'
+  roomPin = '4092',
+  onOpenSitrep
 }) => {
   const [istTime, setIstTime] = useState('');
   const [utcTime, setUtcTime] = useState('');
@@ -200,6 +203,17 @@ export const CommandTopbar: React.FC<CommandTopbarProps> = ({
           className="p-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
         >
           {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+        </button>
+
+        {/* UPGRADE 4: 1-Click Generate KSDMA Sitrep PDF / Print Report */}
+        <button
+          onClick={onOpenSitrep}
+          title="Generate & Export Official KSDMA Executive Situation Report (PDF / Print)"
+          className="px-2.5 py-1.5 rounded bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 text-xs font-mono font-bold flex items-center gap-1.5 transition-all shadow-sm glow-cyan"
+        >
+          <FileText className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="hidden lg:inline">GENERATE SITREP</span>
+          <span className="lg:hidden">SITREP</span>
         </button>
 
         {/* Export Brief */}

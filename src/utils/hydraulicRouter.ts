@@ -1,3 +1,4 @@
+import { interpolate20Coordinates } from './geoUtils';
 import type {
   DamRuleCurvePoint,
   DamSpillwayOptimizerResult,
@@ -54,27 +55,7 @@ function solveNormalDepthAndVelocity(
 /**
  * Interpolates [lon, lat] along a polyline to create 20 equidistant points
  */
-function interpolate20Coordinates(pathCoords: [number, number][]): [number, number][] {
-  if (pathCoords.length < 2) return Array(20).fill([76.5, 10.0]);
-  const result: [number, number][] = [];
-  const totalSegments = pathCoords.length - 1;
-
-  for (let i = 0; i < 20; i++) {
-    const t = i / 19; // 0.0 to 1.0
-    const globalPos = t * totalSegments;
-    const segIndex = Math.min(totalSegments - 1, Math.floor(globalPos));
-    const localT = globalPos - segIndex;
-
-    const p1 = pathCoords[segIndex];
-    const p2 = pathCoords[segIndex + 1] || p1;
-
-    const lon = p1[0] + (p2[0] - p1[0]) * localT;
-    const lat = p1[1] + (p2[1] - p1[1]) * localT;
-    result.push([Number(lon.toFixed(5)), Number(lat.toFixed(5))]);
-  }
-
-  return result;
-}
+// interpolate20Coordinates imported from geoUtils
 
 /**
  * UPGRADE 2.1: Muskingum-Cunge Variable-Parameter Wave Solver across 20 River Reaches

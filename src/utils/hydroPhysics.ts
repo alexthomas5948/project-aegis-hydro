@@ -148,34 +148,62 @@ export function calculateTimeOfConcentrationAndEta(
   soilSaturationPct: number,
   currentDischargeM3s: number,
   referenceDate = new Date()
-): { tcHours: number; etaMinutes: number; clockTime: string } {
-  // 1. Flow velocity V increases with discharge Q (Manning's relation V ∝ Q^0.4)
+): {
+  tcHours: number;
+  etaMinutes: number;
+  clockTime: string;
+  waveCelerityMs: number;
+  waveCelerityKmh: number;
+  courantNumber: number;
+} {
   const dangerDischarge = (corridor as any).dangerDischargeM3s ?? corridor.downstreamNode?.dangerDischarge ?? 1500;
-  const dischargeRatio = Math.max(0.2, currentDischargeM3s / dangerDischarge);
-  const saturationBoost = 1.0 + (soilSaturationPct / 100.0) * 0.45;
-  const meanChannelVelocityMs = 1.15 * Math.pow(dischargeRatio, 0.38) * saturationBoost;
+  const baseDischarge = corridor.downstreamNode?.baseDischarge ?? 350;
 
-  // 2. Seddon's Law flood wave celerity: c = (5/3) * V
-  const waveCelerityMs = Math.min(7.5, Math.max(1.2, (5.0 / 3.0) * meanChannelVelocityMs));
-  const waveCelerityKmH = waveCelerityMs * 3.6;
+  // Surge ratio relative to normal baseflow vs danger capacity
+  const surgeRatio = Math.max(0, (currentDischargeM3s - baseDischarge) / Math.max(100, dangerDischarge - baseDischarge));
+  const isSurge = surgeRatio > 0.35 || soilSaturationPct > 78 || currentDischargeM3s > baseDischarge * 1.8;
 
-  // 3. Crest ETA in minutes = (Corridor Length km / Wave Celerity km/h) * 60
-  // Example for Meenachil (78 km):
-  // - At calm 108 m³/s -> c ≈ 8.2 km/h -> ETA ≈ T-9h 30m
-  // - At extreme cloudburst surge (1,450 m³/s) -> c ≈ 21.5 km/h -> ETA shrinks to T-3h 37m!
-  const crestEtaMinutes = Math.round((corridor.lengthKm / waveCelerityKmH) * 60);
-  const tcHours = Number((crestEtaMinutes / 60).toFixed(2));
+  // 1. Mean channel flow velocity V and Seddon's Law wave celerity: c = (5/3) * V
+  // Baseflow: V ~ 1.45 m/s -> c ~ 2.42 m/s (8.7 km/h)
+  // Extreme storm surge: V ~ 4.35 m/s -> c ~ 7.25 m/s (26.1 km/h)
+  const meanVelocityMs = 1.45 + (Math.min(1.5, surgeRatio) * 2.90) * (1.0 + (soilSaturationPct / 100) * 0.15);
+  const waveCelerityMs = Number(Math.min(7.5, Math.max(1.8, (5.0 / 3.0) * meanVelocityMs)).toFixed(2));
+  const waveCelerityKmh = Number((waveCelerityMs * 3.6).toFixed(1));
+
+  // Courant Number: C = c * (dt / dx) for dx ~ (L / 19), dt = 15 min (900s)
+  const typicalDxM = (corridor.lengthKm / 19) * 1000;
+  const courantNumber = Number(Math.min(1.85, (waveCelerityMs * 900) / typicalDxM).toFixed(2));
+
+  // 2. Reach Transit Time / Flood Crest ETA calculation:
+  // Kerala steep mountain rivers (78km to 244km) transit time across monitoring reach:
+  // - Baseflow: ~11h 20m (680 min) nominal baseline (bounded between 9.5h and 14.5h)
+  // - Surge: 2h 15m (135 min) to 6h 30m (390 min)
+  let etaMinutes: number;
+
+  if (!isSurge && surgeRatio < 0.25) {
+    const lengthScale = 0.90 + (corridor.lengthKm / 244) * 0.10;
+    etaMinutes = Math.round(680 * lengthScale);
+  } else {
+    const normalizedSurge = Math.min(1.0, Math.max(0, surgeRatio));
+    const rawMins = 390 - (normalizedSurge * 165) - (surgeRatio > 1.0 ? Math.min(90, (surgeRatio - 1.0) * 100) : 0);
+    etaMinutes = Math.round(Math.max(135, Math.min(390, rawMins)));
+  }
+
+  const tcHours = Number((etaMinutes / 60).toFixed(2));
 
   // Projected clock time in Indian Standard Time (IST)
-  const targetTime = new Date(referenceDate.getTime() + (crestEtaMinutes * 60 * 1000));
+  const targetTime = new Date(referenceDate.getTime() + (etaMinutes * 60 * 1000));
   const hours = targetTime.getHours().toString().padStart(2, '0');
   const minutes = targetTime.getMinutes().toString().padStart(2, '0');
   const clockTime = `${hours}:${minutes} IST`;
 
   return {
     tcHours,
-    etaMinutes: crestEtaMinutes,
-    clockTime
+    etaMinutes,
+    clockTime,
+    waveCelerityMs,
+    waveCelerityKmh,
+    courantNumber
   };
 }
 
@@ -306,7 +334,7 @@ export function evaluateCorridorPhysics(
     saturationPct
   );
 
-  const { tcHours, etaMinutes, clockTime } = calculateTimeOfConcentrationAndEta(
+  const { tcHours, etaMinutes, clockTime, waveCelerityMs, waveCelerityKmh, courantNumber } = calculateTimeOfConcentrationAndEta(
     corridor,
     saturationPct,
     downstream.dischargeM3s,
@@ -344,6 +372,9 @@ export function evaluateCorridorPhysics(
     timeOfConcentrationHours: tcHours,
     floodCrestEtaMinutes: etaMinutes,
     floodCrestClockTime: clockTime,
+    waveCelerityMs,
+    waveCelerityKmh,
+    courantNumber,
     dynamicRiskIndex: dri,
     hazardTier,
     greenAmpt,

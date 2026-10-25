@@ -21,6 +21,7 @@ import { MonsoonSimulatorModal } from './components/MonsoonSimulatorModal';
 import { EmergencyVoiceDispatchModal } from './components/EmergencyVoiceDispatchModal';
 import { SixVectorMultiHazardMatrix } from './components/SixVectorMultiHazardMatrix';
 import { FieldNodePairingModal } from './components/FieldNodePairingModal';
+import { KsdmaSitrepModal } from './components/KsdmaSitrepModal';
 import { MobileFieldNode } from './components/MobileFieldNode';
 import {
   AlertTriangle,
@@ -50,6 +51,7 @@ export function App() {
   const [selectedCorridorId, setSelectedCorridorId] = useState<string>('periyar');
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isPairingModalOpen, setIsPairingModalOpen] = useState(false);
+  const [isSitrepOpen, setIsSitrepOpen] = useState(false);
   const [activeEmergencyAlert, setActiveEmergencyAlert] = useState<DispatchVoiceAlert | null>(null);
 
   // Live Smartphone HIL Sensor Node state
@@ -279,6 +281,7 @@ export function App() {
         onOpenSimulator={() => setIsSimulatorOpen(true)}
         onOpenVoiceConsole={handleTriggerEmergencyDispatch}
         onOpenPairingModal={() => setIsPairingModalOpen(true)}
+        onOpenSitrep={() => setIsSitrepOpen(true)}
         hasCriticalAlert={hasCriticalAlert}
         isHILConnected={isHILConnected}
         roomPin={roomPin}
@@ -350,6 +353,18 @@ export function App() {
         telemetry={fieldNodeTelemetry}
         isConnected={isHILConnected}
       />
+
+      {/* 10. KSDMA Executive Situation Report (SITREP) Modal (UPGRADE 4) */}
+      {selectedTelemetry && (
+        <KsdmaSitrepModal
+          isOpen={isSitrepOpen}
+          onClose={() => setIsSitrepOpen(false)}
+          corridor={effectiveSelectedCorridor}
+          telemetry={selectedTelemetry}
+          hazardState={sixVectorHazardState}
+          telemetryMap={effectiveTelemetryMap}
+        />
+      )}
 
       {/* Tactical Footer */}
       <footer className="w-full border-t border-slate-900 bg-[#04060d] py-3 px-4 text-xs font-mono text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2">

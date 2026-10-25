@@ -13,7 +13,10 @@ import {
   buildUpstreamHazardNodesGeoJSON,
   buildMuskingumReachesGeoJSON,
   buildInfrastructureMarkersGeoJSON,
-  buildEvacuationRoutesGeoJSON
+  buildEvacuationRoutesGeoJSON,
+  buildActiveCorridorStreamlineGeoJSON,
+  buildDiscretizedReachNodesGeoJSON,
+  buildBridgeMarkersGeoJSON
 } from '../utils/geoUtils';
 import {
   Compass,
@@ -27,8 +30,9 @@ import {
   AlertTriangle,
   Hospital,
   Shield,
-  Zap,
-  Activity
+  Activity,
+  Play,
+  Square
 } from 'lucide-react';
 
 interface Aegis3DMapProps {
@@ -101,6 +105,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
   const mapRef = useRef<MapLibreMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const tourTimeoutsRef = useRef<number[]>([]);
 
   const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [inundationVisible, setInundationVisible] = useState(true);
@@ -109,6 +114,68 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
   const [evacuationVisible, setEvacuationVisible] = useState(true);
   const [cursorCoords, setCursorCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isTourPlaying, setIsTourPlaying] = useState(false);
+
+  const selectedCorridor = KERALA_CORRIDORS.find(c => c.id === selectedCorridorId) || KERALA_CORRIDORS[0];
+
+  // Helper to safely synchronize all GeoJSON data into MapLibre
+  const syncAllGeoJSONSources = useCallback((map: MapLibreMap) => {
+    if (!map) return;
+
+    try {
+      const activeCorridor = KERALA_CORRIDORS.find(c => c.id === selectedCorridorId) || KERALA_CORRIDORS[0];
+
+      // 1. Inundation zones
+      const inunSrc = map.getSource('inundation-zones') as GeoJSONSource | undefined;
+      if (inunSrc) inunSrc.setData(buildInundationGeoJSON(KERALA_CORRIDORS, telemetryMap) as any);
+
+      // 2. Statewide flow paths
+      const flowSrc = map.getSource('flow-paths') as GeoJSONSource | undefined;
+      if (flowSrc) flowSrc.setData(buildFlowPathsGeoJSON(KERALA_CORRIDORS, telemetryMap) as any);
+
+      // 3. Upstream hazard nodes
+      const hazSrc = map.getSource('hazard-nodes') as GeoJSONSource | undefined;
+      if (hazSrc) hazSrc.setData(buildUpstreamHazardNodesGeoJSON(KERALA_CORRIDORS, telemetryMap) as any);
+
+      // 4. Active Corridor Glowing Streamline (Upstream -> Midstream -> Downstream 20 points)
+      const streamlineSrc = map.getSource('active-corridor-streamline') as GeoJSONSource | undefined;
+      if (streamlineSrc) {
+        streamlineSrc.setData(buildActiveCorridorStreamlineGeoJSON(activeCorridor, telemetryMap) as any);
+      }
+
+      // 5. 20 Discretized Reach Nodes (Circles with peak crest tag)
+      const reachNodesSrc = map.getSource('muskingum-reach-nodes') as GeoJSONSource | undefined;
+      if (reachNodesSrc) {
+        reachNodesSrc.setData(buildDiscretizedReachNodesGeoJSON(activeCorridor, telemetryMap) as any);
+      }
+
+      // 6. Muskingum-Cunge Reach Line Segments
+      const reachesSrc = map.getSource('muskingum-reaches') as GeoJSONSource | undefined;
+      if (reachesSrc) {
+        reachesSrc.setData(buildMuskingumReachesGeoJSON(telemetryMap, selectedCorridorId) as any);
+      }
+
+      // 7. Critical Infrastructure Assets
+      const infraSrc = map.getSource('infrastructure-assets') as GeoJSONSource | undefined;
+      if (infraSrc) {
+        infraSrc.setData(buildInfrastructureMarkersGeoJSON(telemetryMap, selectedCorridorId) as any);
+      }
+
+      // 8. Evacuation Routes
+      const evacSrc = map.getSource('evacuation-routes') as GeoJSONSource | undefined;
+      if (evacSrc) {
+        evacSrc.setData(buildEvacuationRoutesGeoJSON(telemetryMap, selectedCorridorId) as any);
+      }
+
+      // 9. Bridge Markers
+      const bridgeSrc = map.getSource('bridge-markers') as GeoJSONSource | undefined;
+      if (bridgeSrc) {
+        bridgeSrc.setData(buildBridgeMarkersGeoJSON(telemetryMap, selectedCorridorId) as any);
+      }
+    } catch (err) {
+      console.warn('GeoJSON update sync exception:', err);
+    }
+  }, [selectedCorridorId, telemetryMap]);
 
   // Initialize MapLibre
   useEffect(() => {
@@ -126,7 +193,6 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
 
     map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
 
-    // Ensure WebGL initializes with correct dimensions 200ms after mount
     const resizeTimer = setTimeout(() => {
       map.resize();
     }, 200);
@@ -151,37 +217,61 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         console.warn('MapLibre 3D terrain loading:', e);
       }
 
+      const activeCorridor = KERALA_CORRIDORS.find(c => c.id === selectedCorridorId) || KERALA_CORRIDORS[0];
+
       // 2. Base Sources
       map.addSource('inundation-zones', {
         type: 'geojson',
-        data: buildInundationGeoJSON(KERALA_CORRIDORS, telemetryMap)
+        data: buildInundationGeoJSON(KERALA_CORRIDORS, telemetryMap) as any
       });
 
       map.addSource('flow-paths', {
         type: 'geojson',
-        data: buildFlowPathsGeoJSON(KERALA_CORRIDORS, telemetryMap)
+        data: buildFlowPathsGeoJSON(KERALA_CORRIDORS, telemetryMap) as any
       });
 
       map.addSource('hazard-nodes', {
         type: 'geojson',
-        data: buildUpstreamHazardNodesGeoJSON(KERALA_CORRIDORS, telemetryMap)
+        data: buildUpstreamHazardNodesGeoJSON(KERALA_CORRIDORS, telemetryMap) as any
       });
 
-      // UPGRADE 3.1 & 3.2 Sources: Muskingum reaches, infrastructure assets, evacuation routes
+      // Active River Corridor Streamline Source
+      map.addSource('active-corridor-streamline', {
+        type: 'geojson',
+        data: buildActiveCorridorStreamlineGeoJSON(activeCorridor, telemetryMap) as any
+      });
+
+      // 20 Discretized Reach Nodes Source
+      map.addSource('muskingum-reach-nodes', {
+        type: 'geojson',
+        data: buildDiscretizedReachNodesGeoJSON(activeCorridor, telemetryMap) as any
+      });
+
+      // Muskingum Cunge Reaches
       map.addSource('muskingum-reaches', {
         type: 'geojson',
-        data: buildMuskingumReachesGeoJSON(telemetryMap, selectedCorridorId)
+        data: buildMuskingumReachesGeoJSON(telemetryMap, selectedCorridorId) as any
       });
 
+      // Infrastructure Assets
       map.addSource('infrastructure-assets', {
         type: 'geojson',
-        data: buildInfrastructureMarkersGeoJSON(telemetryMap, selectedCorridorId)
+        data: buildInfrastructureMarkersGeoJSON(telemetryMap, selectedCorridorId) as any
       });
 
+      // Evacuation Routes
       map.addSource('evacuation-routes', {
         type: 'geojson',
-        data: buildEvacuationRoutesGeoJSON(telemetryMap, selectedCorridorId)
+        data: buildEvacuationRoutesGeoJSON(telemetryMap, selectedCorridorId) as any
       });
+
+      // Bridge Markers
+      map.addSource('bridge-markers', {
+        type: 'geojson',
+        data: buildBridgeMarkersGeoJSON(telemetryMap, selectedCorridorId) as any
+      });
+
+      // ----------------- LAYERS -----------------
 
       // Layer: Inundation Polygons Fill
       map.addLayer({
@@ -220,7 +310,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         }
       });
 
-      // Layer: Flow Paths Outer Glow
+      // Layer: Statewide Flow Paths Glow
       map.addLayer({
         id: 'flow-paths-glow',
         type: 'line',
@@ -235,13 +325,13 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
             'ADVISORY', '#06b6d4',
             '#00f2fe'
           ],
-          'line-width': 8,
-          'line-opacity': 0.35,
+          'line-width': 6,
+          'line-opacity': 0.30,
           'line-blur': 4
         }
       });
 
-      // Layer: Flow Paths Main Line
+      // Layer: Statewide Flow Paths Core
       map.addLayer({
         id: 'flow-paths-core',
         type: 'line',
@@ -256,12 +346,40 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
             'ADVISORY', '#22d3ee',
             '#38bdf8'
           ],
+          'line-width': 2.5,
+          'line-opacity': 0.75
+        }
+      });
+
+      // --- UPGRADE 1: ACTIVE RIVER CORRIDOR STREAMLINE (DUAL-LAYER GLOWING GEOJSON) ---
+      // Outer Glow Layer: line-width: 10, line-blur: 6, line-opacity: 0.45, color #06B6D4 (Normal) / #EF4444 (Critical/Surge)
+      map.addLayer({
+        id: 'active-streamline-glow',
+        type: 'line',
+        source: 'active-corridor-streamline',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': ['get', 'colorGlow'],
+          'line-width': 10,
+          'line-blur': 6,
+          'line-opacity': 0.45
+        }
+      });
+
+      // Core Streamline Layer: line-width: 3.5, high-contrast #22D3EE (Normal) / #F87171 (Alert)
+      map.addLayer({
+        id: 'active-streamline-core',
+        type: 'line',
+        source: 'active-corridor-streamline',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': ['get', 'colorCore'],
           'line-width': 3.5,
           'line-opacity': 0.95
         }
       });
 
-      // Layer: Muskingum 20-Reach Celerity Streamlines
+      // Muskingum 20-Reach Celerity Streamlines
       map.addLayer({
         id: 'muskingum-reaches-layer',
         type: 'line',
@@ -275,14 +393,14 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
           ],
           'line-width': [
             'interpolate', ['linear'], ['get', 'celerityMs'],
-            1.0, 4.0,
-            6.0, 9.0
+            1.0, 3.5,
+            6.0, 7.5
           ],
-          'line-opacity': 0.95
+          'line-opacity': 0.85
         }
       });
 
-      // Layer: Evacuation Routes (Green Safe vs Red Severed Bridge)
+      // Evacuation Routes (Green Safe vs Red Severed Bridge)
       map.addLayer({
         id: 'evacuation-routes-layer',
         type: 'line',
@@ -304,6 +422,90 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
             ['get', 'isBlocked'], ['literal', [2, 2]],
             ['literal', [1, 0]]
           ]
+        }
+      });
+
+      // --- 20 DISCRETIZED REACH NODES (CIRCLE LAYER ALONG RIVER PATH) ---
+      map.addLayer({
+        id: 'reach-nodes-glow',
+        type: 'circle',
+        source: 'muskingum-reach-nodes',
+        paint: {
+          'circle-radius': ['case', ['get', 'isCrestPeak'], 10, 6],
+          'circle-color': [
+            'case',
+            ['get', 'isCrestPeak'], '#ef4444',
+            ['get', 'isAlert'], '#f87171',
+            '#06b6d4'
+          ],
+          'circle-opacity': 0.45,
+          'circle-blur': 0.4
+        }
+      });
+
+      map.addLayer({
+        id: 'reach-nodes-core',
+        type: 'circle',
+        source: 'muskingum-reach-nodes',
+        paint: {
+          'circle-radius': ['case', ['get', 'isCrestPeak'], 6.5, 4.0],
+          'circle-color': [
+            'case',
+            ['get', 'isCrestPeak'], '#ff0033',
+            ['get', 'isAlert'], '#ef4444',
+            '#22d3ee'
+          ],
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#ffffff'
+        }
+      });
+
+      // --- PULSING PEAK FLOOD CREST NODE MARKER ---
+      map.addLayer({
+        id: 'peak-crest-node-pulse',
+        type: 'circle',
+        source: 'muskingum-reach-nodes',
+        filter: ['==', ['get', 'isCrestPeak'], true],
+        paint: {
+          'circle-radius': 14,
+          'circle-color': '#ef4444',
+          'circle-opacity': 0.5,
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ff4d4f'
+        }
+      });
+
+      // --- BRIDGE CROSSING MARKERS ---
+      map.addLayer({
+        id: 'bridge-markers-halo',
+        type: 'circle',
+        source: 'bridge-markers',
+        paint: {
+          'circle-radius': 11,
+          'circle-color': [
+            'case',
+            ['get', 'isBlocked'], '#ef4444',
+            '#10b981'
+          ],
+          'circle-opacity': 0.4,
+          'circle-stroke-width': 1,
+          'circle-stroke-color': '#ffffff'
+        }
+      });
+
+      map.addLayer({
+        id: 'bridge-markers-core',
+        type: 'circle',
+        source: 'bridge-markers',
+        paint: {
+          'circle-radius': 5.5,
+          'circle-color': [
+            'case',
+            ['get', 'isBlocked'], '#ff2222',
+            '#10b981'
+          ],
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#050811'
         }
       });
 
@@ -353,7 +555,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         type: 'circle',
         source: 'infrastructure-assets',
         paint: {
-          'circle-radius': 11,
+          'circle-radius': 10,
           'circle-color': [
             'match',
             ['get', 'status'],
@@ -372,7 +574,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         type: 'circle',
         source: 'infrastructure-assets',
         paint: {
-          'circle-radius': 5.5,
+          'circle-radius': 5,
           'circle-color': [
             'match',
             ['get', 'status'],
@@ -385,23 +587,90 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         }
       });
 
-      // Click flow path or inundation zone to select corridor
+      // Synchronize all data immediately upon load
+      syncAllGeoJSONSources(map);
+
+      // Interactions: Corridor clicks
       map.on('click', 'flow-paths-core', (e: any) => {
         if (e.features && e.features[0]) {
           const corridorId = e.features[0].properties?.corridorId;
-          if (corridorId) {
-            onSelectCorridor(corridorId);
-          }
+          if (corridorId) onSelectCorridor(corridorId);
         }
       });
 
       map.on('click', 'inundation-fill-layer', (e: any) => {
         if (e.features && e.features[0]) {
           const corridorId = e.features[0].properties?.corridorId;
-          if (corridorId) {
-            onSelectCorridor(corridorId);
-          }
+          if (corridorId) onSelectCorridor(corridorId);
         }
+      });
+
+      // Hover popup for 20 Discretized Reach Nodes
+      map.on('mouseenter', 'reach-nodes-core', (e: any) => {
+        map.getCanvas().style.cursor = 'pointer';
+        if (e.features && e.features[0]) {
+          const props = e.features[0].properties;
+          const coords = (e.features[0].geometry as any).coordinates.slice();
+
+          const popup = popupRef.current ?? new Popup({ closeButton: false, closeOnClick: false, offset: 15 });
+          popupRef.current = popup;
+
+          popup
+            .setLngLat(coords)
+            .setHTML(`
+              <div class="space-y-1 font-mono text-xs">
+                <div class="text-[10px] ${props.isCrestPeak ? 'text-red-400 font-bold animate-pulse' : 'text-cyan-400 font-bold'} uppercase tracking-wider">
+                  ${props.isCrestPeak ? '🚨 PEAK FLOOD CREST REACH' : 'MUSKINGUM-CUNGE REACH NODE'}
+                </div>
+                <div class="font-bold text-white">Reach #${props.reachNumber} (${props.distanceKm} km from Highland)</div>
+                <div class="grid grid-cols-2 gap-x-2 text-[11px] pt-1 text-slate-300">
+                  <div>Discharge: <span class="text-amber-400 font-bold">${props.flowDischargeM3s} m³/s</span></div>
+                  <div>Wave Celerity: <span class="text-cyan-300 font-bold">${props.waveCelerityMs} m/s</span></div>
+                  <div>Water Depth: <span class="text-white">${props.waterDepthM} m</span></div>
+                  <div>Status: <span class="${props.isCrestPeak ? 'text-red-400 font-bold' : 'text-emerald-400'}">${props.isCrestPeak ? 'PEAK CREST' : 'PROPAGATING'}</span></div>
+                </div>
+              </div>
+            `)
+            .addTo(map);
+        }
+      });
+
+      map.on('mouseleave', 'reach-nodes-core', () => {
+        map.getCanvas().style.cursor = '';
+        popupRef.current?.remove();
+      });
+
+      // Hover popup for Bridge Markers
+      map.on('mouseenter', 'bridge-markers-core', (e: any) => {
+        map.getCanvas().style.cursor = 'pointer';
+        if (e.features && e.features[0]) {
+          const props = e.features[0].properties;
+          const coords = (e.features[0].geometry as any).coordinates.slice();
+
+          const popup = popupRef.current ?? new Popup({ closeButton: false, closeOnClick: false, offset: 15 });
+          popupRef.current = popup;
+
+          popup
+            .setLngLat(coords)
+            .setHTML(`
+              <div class="space-y-1 font-mono text-xs">
+                <div class="text-[10px] font-bold uppercase tracking-wider ${props.isBlocked ? 'text-red-400 animate-pulse' : 'text-emerald-400'}">
+                  BRIDGE CROSSING // ${props.isBlocked ? 'SUBMERGED & SEVERED' : 'OPEN & SECURE'}
+                </div>
+                <div class="font-bold text-white">${props.name}</div>
+                <div class="text-[11px] text-slate-300 pt-0.5">
+                  Clearance Speed: <span class="text-cyan-300 font-bold">${props.clearanceSpeedKmh} km/h</span> | Elev: ${props.elevationM}m
+                </div>
+                ${props.isBlocked ? '<div class="text-[11px] text-red-400 font-bold">BREACHED BY RIVER SURGE — EVACUATION ROUTE DETOURED</div>' : ''}
+              </div>
+            `)
+            .addTo(map);
+        }
+      });
+
+      map.on('mouseleave', 'bridge-markers-core', () => {
+        map.getCanvas().style.cursor = '';
+        popupRef.current?.remove();
       });
 
       // Hover popup for Upstream Hazard Nodes
@@ -417,14 +686,14 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
           popup
             .setLngLat(coords)
             .setHTML(`
-              <div class="space-y-1">
+              <div class="space-y-1 font-mono text-xs">
                 <div class="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">UPSTREAM CATCHMENT // PDE SOLVER</div>
                 <div class="font-bold text-white">${props.nodeName}</div>
                 <div class="grid grid-cols-2 gap-x-3 text-[11px] pt-1">
-                  <div>Slope: <span class="text-amber-400 font-mono">${props.slopeDeg}°</span></div>
-                  <div>Elevation: <span class="text-cyan-300 font-mono">${props.elevationM}m</span></div>
-                  <div>Slope FoS: <span class="${Number(props.factorOfSafety) < 1.05 ? 'text-red-400 font-bold' : Number(props.factorOfSafety) < 1.25 ? 'text-amber-400 font-bold' : 'text-emerald-400'} font-mono">${Number(props.factorOfSafety).toFixed(2)} (${Number(props.factorOfSafety) < 1.05 ? 'CRITICAL SLIP' : Number(props.factorOfSafety) < 1.25 ? 'WATCH (MARGINAL)' : 'STABLE'})</span></div>
-                  <div>Saturation: <span class="text-cyan-400 font-mono">${props.saturationPct}%</span></div>
+                  <div>Slope: <span class="text-amber-400">${props.slopeDeg}°</span></div>
+                  <div>Elevation: <span class="text-cyan-300">${props.elevationM}m</span></div>
+                  <div>Slope FoS: <span class="${Number(props.factorOfSafety) < 1.05 ? 'text-red-400 font-bold' : Number(props.factorOfSafety) < 1.25 ? 'text-amber-400 font-bold' : 'text-emerald-400'}">${Number(props.factorOfSafety).toFixed(2)} (${Number(props.factorOfSafety) < 1.05 ? 'CRITICAL SLIP' : Number(props.factorOfSafety) < 1.25 ? 'WATCH (MARGINAL)' : 'STABLE'})</span></div>
+                  <div>Saturation: <span class="text-cyan-400">${props.saturationPct}%</span></div>
                 </div>
                 ${props.isLandslideRisk ? '<div class="text-[10px] text-red-400 font-bold mt-1 animate-pulse">CRITICAL LANDSLIDE / DEBRIS-DAM RISK</div>' : ''}
               </div>
@@ -452,7 +721,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
           popup
             .setLngLat(coords)
             .setHTML(`
-              <div class="space-y-1">
+              <div class="space-y-1 font-mono text-xs">
                 <div class="text-[10px] font-bold uppercase tracking-wider ${isSub ? 'text-red-400' : 'text-emerald-400'}">
                   ${props.facilityType?.toUpperCase()} // STATUS: ${props.status}
                 </div>
@@ -480,16 +749,34 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         });
       });
 
-      // Continuous animated dash offset for Muskingum river particle wave simulation
+      // Dynamic animation loop for river streamline dash offset and pulsing peak crest node
       let step = 0;
       const animateFlow = () => {
-        step = (step + 1) % 100;
+        step = (step + 1) % 120;
+
+        // Animate Muskingum reaches
         if (map.getLayer('muskingum-reaches-layer')) {
           map.setPaintProperty('muskingum-reaches-layer', 'line-dasharray', [
             Math.max(1, (step % 12) / 2),
             2
           ]);
         }
+
+        // Animate Active Streamline Core
+        if (map.getLayer('active-streamline-core')) {
+          const dash1 = 2 + (step % 8);
+          map.setPaintProperty('active-streamline-core', 'line-dasharray', [dash1, 3]);
+        }
+
+        // Pulse Peak Flood Crest Node
+        if (map.getLayer('peak-crest-node-pulse')) {
+          const pulsePhase = (Date.now() % 1600) / 1600; // 0 to 1
+          const pulseRadius = 8 + pulsePhase * 16; // 8 to 24px
+          const pulseOpacity = 0.85 * (1 - pulsePhase);
+          map.setPaintProperty('peak-crest-node-pulse', 'circle-radius', pulseRadius);
+          map.setPaintProperty('peak-crest-node-pulse', 'circle-opacity', pulseOpacity);
+        }
+
         animFrameRef.current = requestAnimationFrame(animateFlow);
       };
       animFrameRef.current = requestAnimationFrame(animateFlow);
@@ -500,51 +787,19 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
     return () => {
       clearTimeout(resizeTimer);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      tourTimeoutsRef.current.forEach(t => clearTimeout(t));
       popupRef.current?.remove();
       map.remove();
       mapRef.current = null;
     };
-  }, []); // Run once on mount
+  }, []);
 
   // Update dynamic GeoJSON data whenever telemetryMap or selectedCorridorId changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
-
-    try {
-      const inundationSource = map.getSource('inundation-zones') as GeoJSONSource | undefined;
-      if (inundationSource) {
-        inundationSource.setData(buildInundationGeoJSON(KERALA_CORRIDORS, telemetryMap));
-      }
-
-      const flowSource = map.getSource('flow-paths') as GeoJSONSource | undefined;
-      if (flowSource) {
-        flowSource.setData(buildFlowPathsGeoJSON(KERALA_CORRIDORS, telemetryMap));
-      }
-
-      const hazardSource = map.getSource('hazard-nodes') as GeoJSONSource | undefined;
-      if (hazardSource) {
-        hazardSource.setData(buildUpstreamHazardNodesGeoJSON(KERALA_CORRIDORS, telemetryMap));
-      }
-
-      const reachesSource = map.getSource('muskingum-reaches') as GeoJSONSource | undefined;
-      if (reachesSource) {
-        reachesSource.setData(buildMuskingumReachesGeoJSON(telemetryMap, selectedCorridorId));
-      }
-
-      const infraSource = map.getSource('infrastructure-assets') as GeoJSONSource | undefined;
-      if (infraSource) {
-        infraSource.setData(buildInfrastructureMarkersGeoJSON(telemetryMap, selectedCorridorId));
-      }
-
-      const evacSource = map.getSource('evacuation-routes') as GeoJSONSource | undefined;
-      if (evacSource) {
-        evacSource.setData(buildEvacuationRoutesGeoJSON(telemetryMap, selectedCorridorId));
-      }
-    } catch (e) {
-      console.warn('GeoJSON update sync:', e);
-    }
-  }, [telemetryMap, selectedCorridorId]);
+    syncAllGeoJSONSources(map);
+  }, [telemetryMap, selectedCorridorId, syncAllGeoJSONSources]);
 
   // Handle Layer Visibility Toggles
   useEffect(() => {
@@ -555,6 +810,19 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
       const visibility = inundationVisible ? 'visible' : 'none';
       map.setLayoutProperty('inundation-fill-layer', 'visibility', visibility);
       map.setLayoutProperty('inundation-line-layer', 'visibility', visibility);
+    }
+
+    if (map.getLayer('active-streamline-glow') && map.getLayer('active-streamline-core')) {
+      const vis = reachesVisible ? 'visible' : 'none';
+      map.setLayoutProperty('active-streamline-glow', 'visibility', vis);
+      map.setLayoutProperty('active-streamline-core', 'visibility', vis);
+    }
+
+    if (map.getLayer('reach-nodes-glow') && map.getLayer('reach-nodes-core') && map.getLayer('peak-crest-node-pulse')) {
+      const vis = reachesVisible ? 'visible' : 'none';
+      map.setLayoutProperty('reach-nodes-glow', 'visibility', vis);
+      map.setLayoutProperty('reach-nodes-core', 'visibility', vis);
+      map.setLayoutProperty('peak-crest-node-pulse', 'visibility', vis);
     }
 
     if (map.getLayer('muskingum-reaches-layer')) {
@@ -569,6 +837,12 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
 
     if (map.getLayer('evacuation-routes-layer')) {
       map.setLayoutProperty('evacuation-routes-layer', 'visibility', evacuationVisible ? 'visible' : 'none');
+    }
+
+    if (map.getLayer('bridge-markers-core') && map.getLayer('bridge-markers-halo')) {
+      const vis = evacuationVisible ? 'visible' : 'none';
+      map.setLayoutProperty('bridge-markers-core', 'visibility', vis);
+      map.setLayoutProperty('bridge-markers-halo', 'visibility', vis);
     }
   }, [inundationVisible, reachesVisible, infrastructureVisible, evacuationVisible]);
 
@@ -590,7 +864,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
           maxzoom: 14
         });
       }
-      map.setTerrain({ source: 'aws-terrain', exaggeration: 1.6 });
+      map.setTerrain({ source: 'aws-terrain', exaggeration: 1.8 });
     } else {
       map.setTerrain(null);
     }
@@ -631,9 +905,91 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
     }
   }, [selectedCorridorId, flyToCorridor]);
 
+  // ----------------- UPGRADE 1: 3D RIVER CORRIDOR TOUR -----------------
+  const startRiverCorridorTour = () => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Clear previous timeouts if already playing
+    tourTimeoutsRef.current.forEach(t => clearTimeout(t));
+    tourTimeoutsRef.current = [];
+
+    if (isTourPlaying) {
+      setIsTourPlaying(false);
+      return;
+    }
+
+    setIsTourPlaying(true);
+    const corridor = selectedCorridor;
+    const up = corridor.upstreamNode;
+    const down = corridor.downstreamNode;
+    const mid = corridor.midstreamNode || {
+      lat: (up.lat + down.lat) / 2,
+      lon: (up.lon + down.lon) / 2
+    };
+
+    // Bearing from Upstream to Midstream
+    const dLon1 = mid.lon - up.lon;
+    const dLat1 = mid.lat - up.lat;
+    const bearing1 = Math.round((Math.atan2(dLon1, dLat1) * 180) / Math.PI);
+
+    // Bearing from Midstream to Downstream
+    const dLon2 = down.lon - mid.lon;
+    const dLat2 = down.lat - mid.lat;
+    const bearing2 = Math.round((Math.atan2(dLon2, dLat2) * 180) / Math.PI);
+
+    // Stage 1: Fly to Upstream Mountain Scarp (pitch: 72, zoom: 12.5)
+    map.flyTo({
+      center: [up.lon, up.lat],
+      pitch: 72,
+      zoom: 12.5,
+      bearing: bearing1 - 10,
+      speed: 0.9,
+      curve: 1.3,
+      essential: true
+    });
+
+    // Stage 2: Valley bottleneck
+    const t1 = window.setTimeout(() => {
+      map.flyTo({
+        center: [mid.lon, mid.lat],
+        pitch: 68,
+        zoom: 12.0,
+        bearing: bearing2 - 5,
+        speed: 0.75,
+        curve: 1.2,
+        essential: true
+      });
+    }, 3800);
+
+    // Stage 3: Downstream coastal floodplain (pitch: 60, zoom: 11.8)
+    const t2 = window.setTimeout(() => {
+      map.flyTo({
+        center: [down.lon, down.lat],
+        pitch: 60,
+        zoom: 11.8,
+        bearing: bearing2,
+        speed: 0.65,
+        curve: 1.1,
+        essential: true
+      });
+    }, 7800);
+
+    // Stage 4: Conclude tour
+    const t3 = window.setTimeout(() => {
+      setIsTourPlaying(false);
+    }, 11500);
+
+    tourTimeoutsRef.current = [t1, t2, t3];
+  };
+
   const resetToStatewideView = () => {
     const map = mapRef.current;
     if (!map) return;
+
+    tourTimeoutsRef.current.forEach(t => clearTimeout(t));
+    tourTimeoutsRef.current = [];
+    setIsTourPlaying(false);
 
     map.flyTo({
       center: [76.55, 10.15],
@@ -655,13 +1011,13 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
 
   return (
     <div
-      className={`relative w-full ${isFullscreen ? 'fixed inset-0 z-50 bg-[#050811]' : 'h-[520px] rounded-lg'} overflow-hidden border border-slate-800 shadow-2xl`}
-      style={{ height: isFullscreen ? '100vh' : '520px', width: '100%' }}
+      className={`relative w-full ${isFullscreen ? 'fixed inset-0 z-50 bg-[#050811]' : 'h-[530px] rounded-lg'} overflow-hidden border border-slate-800 shadow-2xl`}
+      style={{ height: isFullscreen ? '100vh' : '530px', width: '100%' }}
     >
       <div
         ref={mapContainerRef}
         className="w-full h-full"
-        style={{ height: isFullscreen ? '100vh' : '520px', width: '100%' }}
+        style={{ height: isFullscreen ? '100vh' : '530px', width: '100%' }}
       />
 
       {/* Top Left: Tactical Overlay & Quick Presets */}
@@ -712,8 +1068,32 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         </div>
       </div>
 
-      {/* Top Right: Advanced Layer Toggles */}
+      {/* Top Right: Advanced Layer Toggles & 3D TOUR Button */}
       <div className="absolute top-3 right-14 flex items-center gap-1.5 z-10 pointer-events-auto">
+        {/* UPGRADE 1: "FLY RIVER CORRIDOR (3D TOUR)" BUTTON */}
+        <button
+          onClick={startRiverCorridorTour}
+          title="Fly River Corridor (3D Tour) from upstream mountain scarp down valley to downstream floodplain"
+          className={`glass-panel px-2.5 py-1.5 rounded text-xs font-mono font-bold flex items-center gap-1.5 border transition-all shadow-md ${
+            isTourPlaying
+              ? 'bg-cyan-500 text-black border-cyan-300 animate-pulse glow-cyan'
+              : 'bg-cyan-950/70 hover:bg-cyan-900 text-cyan-300 border-cyan-500/60'
+          }`}
+        >
+          {isTourPlaying ? (
+            <>
+              <Square className="w-3.5 h-3.5 fill-current" />
+              <span className="text-[10px]">STOP TOUR</span>
+            </>
+          ) : (
+            <>
+              <Navigation2 className="w-3.5 h-3.5 text-cyan-400 rotate-45" />
+              <span className="text-[10px] hidden md:inline">FLY RIVER CORRIDOR (3D TOUR)</span>
+              <span className="text-[10px] md:hidden">3D TOUR</span>
+            </>
+          )}
+        </button>
+
         <button
           onClick={toggleTerrain}
           title="Toggle 3D Elevation Terrain"
@@ -727,7 +1107,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
 
         <button
           onClick={() => setReachesVisible(!reachesVisible)}
-          title="Toggle 20 Muskingum-Cunge Streamlines"
+          title="Toggle 20 Muskingum-Cunge Streamlines & Nodes"
           className={`glass-panel p-2 rounded text-xs font-mono flex items-center gap-1 border transition-colors ${
             reachesVisible ? 'text-cyan-300 border-cyan-500/50 bg-cyan-950/40' : 'text-slate-400 border-slate-700'
           }`}
@@ -749,13 +1129,13 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
 
         <button
           onClick={() => setEvacuationVisible(!evacuationVisible)}
-          title="Toggle Autonomous Evacuation Routes"
+          title="Toggle Autonomous Evacuation Routes & Bridge Crossings"
           className={`glass-panel p-2 rounded text-xs font-mono flex items-center gap-1 border transition-colors ${
             evacuationVisible ? 'text-emerald-300 border-emerald-500/50 bg-emerald-950/40' : 'text-slate-400 border-slate-700'
           }`}
         >
           <Shield className="w-3.5 h-3.5" />
-          <span className="text-[10px] hidden sm:inline">EVAC ROUTES</span>
+          <span className="text-[10px] hidden sm:inline">EVAC / BRIDGES</span>
         </button>
 
         <button
@@ -778,7 +1158,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         </button>
       </div>
 
-      {/* Bottom Left: Tactical Symbology Legend */}
+      {/* Bottom Left: Tactical Symbology Legend (UPGRADE 1: ALL 5 ITEMS RENDERED) */}
       <div className="absolute bottom-3 left-3 z-10 glass-panel px-3 py-2 rounded border border-slate-800 text-[10px] font-mono text-slate-300 space-y-1 hidden sm:block">
         <div className="text-[9px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
           <Layers className="w-3 h-3 text-cyan-400" />
@@ -786,11 +1166,15 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         </div>
         <div className="flex flex-wrap items-center gap-3 pt-0.5">
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-sm" />
+            <span className="w-3 h-1 bg-cyan-400 rounded-sm shadow-sm inline-block" />
             <span>Wave Celerity Streamline</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-cyan-300 border border-white" />
+            <span>20 Discretized Reach Nodes</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse border border-white" />
             <span>Peak Flood Crest Node</span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -815,3 +1199,5 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
     </div>
   );
 };
+
+export default Aegis3DMap;

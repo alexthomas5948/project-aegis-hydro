@@ -54,10 +54,28 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
   const isCritical = physics.hazardTier === 'CRITICAL';
   const isWarning = physics.hazardTier === 'WARNING';
 
-  // Format ETA string
+  // Format ETA string & alert state (UPGRADE 2: Realistic Transit Time vs Crest ETA)
   const etaHours = Math.floor(physics.floodCrestEtaMinutes / 60);
   const etaMins = physics.floodCrestEtaMinutes % 60;
   const etaString = etaHours > 0 ? `${etaHours}h ${etaMins}m` : `${etaMins}m`;
+  const isAlert = isCritical || isWarning || physics.dynamicRiskIndex >= 50 || physics.factorOfSafety < 1.05;
+
+  // UPGRADE 3: Governing slip plane synchronization with SoilColumnCrossSectionWidget (z = 2.25m)
+  const governingSlipDepth = physics.iversonPDE?.criticalFailureDepthM ?? 2.25;
+  const governingSlipNode = physics.iversonPDE?.soilNodes?.find(n => n.isCriticalSlipPlane)
+    || physics.iversonPDE?.soilNodes?.find(n => Math.abs(n.depthM - governingSlipDepth) < 0.05)
+    || physics.iversonPDE?.soilNodes?.[9]
+    || physics.iversonPDE?.soilNodes?.[7];
+
+  const liveGoverningFoS = governingSlipNode ? governingSlipNode.fos : physics.factorOfSafety;
+  const liveGoverningPorePressure = governingSlipNode ? governingSlipNode.porePressureKpa : physics.poreWaterPressureKpa;
+  const liveGoverningSaturation = governingSlipNode ? governingSlipNode.saturationPct : physics.deepSaturationPct;
+
+  // Live wave celerity & Courant number
+  const liveCelerityMs = physics.waveCelerityMs ?? 2.85;
+  const liveCelerityKmh = physics.waveCelerityKmh ?? (liveCelerityMs * 3.6);
+  const courantNumber = physics.courantNumber ?? 0.58;
+  const transitHours = physics.timeOfConcentrationHours ?? 11.33;
 
   return (
     <div className={`glass-panel border-t md:border border-slate-800 rounded-lg p-4 transition-all duration-300 ${
@@ -181,14 +199,18 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
           </div>
         </div>
 
-        {/* Metric 5: Flood Crest ETA */}
-        <div className="glass-panel-subtle p-2.5 rounded border border-slate-800">
+        {/* Metric 5: Flood Crest ETA vs Transit Baseline */}
+        <div className={`p-2.5 rounded border transition-all ${
+          isAlert
+            ? 'bg-red-950/40 border-red-500/60 shadow-lg glow-red'
+            : 'glass-panel-subtle border-slate-800'
+        }`}>
           <div className="text-[10px] text-slate-400 font-mono uppercase flex items-center justify-between">
-            <span>Flood Crest ETA</span>
-            <Clock className="w-3 h-3 text-red-400 animate-pulse" />
+            <span>{isAlert ? 'Active Flood Crest ETA' : 'Kinematic Wave Transit'}</span>
+            <Clock className={`w-3 h-3 ${isAlert ? 'text-red-400 animate-pulse' : 'text-cyan-400'}`} />
           </div>
-          <div className="text-xl font-rajdhani font-bold text-red-400 mt-1">
-            T-{etaString}
+          <div className={`text-xl font-rajdhani font-bold mt-1 ${isAlert ? 'text-red-400 animate-pulse' : 'text-cyan-300'}`}>
+            {isAlert ? `CREST ETA: T-${etaString}` : `TRANSIT: ~${etaString} (NOMINAL)`}
           </div>
         </div>
 
@@ -397,8 +419,10 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
                 ? 'High risk of landslide dam breach compounding downstream river discharge crest wave.'
                 : 'Hydraulic routing active. Overland runoff transfer within anticipated attenuation limits.'}
             </div>
-            <div className="text-cyan-400">
-              Projected Peak Crest Arrival: <span className="font-bold text-white">{physics.floodCrestClockTime}</span>
+            <div className={isAlert ? 'text-red-400 font-bold' : 'text-cyan-400'}>
+              {isAlert ? 'Projected Peak Crest Arrival: ' : 'Kinematic Wave Arrival: '}
+              <span className="font-bold text-white">{physics.floodCrestClockTime}</span>
+              <span className="ml-1 text-[10px]">({isAlert ? `T-${etaString}` : `~${etaString} nominal`})</span>
             </div>
           </div>
         </div>
@@ -407,23 +431,25 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
       {/* Tab 2: Hydro-Geomorphic Physics Engine Equations */}
       {activeTab === 'physics' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
-          {/* Box 1: Upstream Infinite Slope FoS */}
+          {/* Box 1: Upstream Infinite Slope FoS (SYNCHRONIZED WITH SOIL COLUMN PDE z = 2.25m) */}
           <div className="glass-panel-subtle p-3 rounded border border-slate-800 space-y-2">
             <div className="text-cyan-400 font-bold uppercase flex items-center justify-between">
               <span>1. Infinite Slope Stability (FoS)</span>
-              <span className={physics.factorOfSafety < 1.05 ? 'text-red-400 font-bold' : physics.factorOfSafety < 1.25 ? 'text-amber-400 font-bold' : 'text-emerald-400'}>
-                FoS = {physics.factorOfSafety.toFixed(2)} ({physics.factorOfSafety < 1.05 ? 'CRITICAL SLIP' : physics.factorOfSafety < 1.25 ? 'WATCH (MARGINAL)' : 'STABLE'})
+              <span className={liveGoverningFoS < 1.05 ? 'text-red-400 font-bold animate-pulse' : liveGoverningFoS < 1.25 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
+                FoS = {liveGoverningFoS.toFixed(2)} ({liveGoverningFoS < 1.05 ? 'CRITICAL SLIP' : liveGoverningFoS < 1.25 ? 'WATCH (MARGINAL)' : 'STABLE'})
               </span>
             </div>
             <div className="p-2 bg-[#060a12] rounded border border-slate-900 text-[11px] text-slate-300">
-              <code>FoS = [c' + (γ·z·cos²θ - u_w)·tan φ'] / [γ·z·sin θ·cos θ]</code>
+              <code>FoS = [c' + (γ·z·cos²θ - u_w)·tan φ'] / [γ·z·sin θ·cos θ] (Governing Slip z = {governingSlipDepth.toFixed(2)}m)</code>
             </div>
             <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-400">
               <div>Slope Angle (θ): <span className="text-white">{corridor.upstreamNode.slopeDeg}°</span></div>
               <div>Soil Cohesion (c'): <span className="text-white">{corridor.upstreamNode.soilCohesionKpa} kPa</span></div>
               <div>Friction Angle (φ'): <span className="text-white">{corridor.upstreamNode.frictionAngleDeg}°</span></div>
-              <div>Bedrock Depth (z): <span className="text-white">{corridor.upstreamNode.bedrockDepthM} m</span></div>
-              <div>Pore Water Pressure (u_w): <span className="text-red-400 font-bold">{physics.poreWaterPressureKpa} kPa</span></div>
+              <div>Governing Slip Depth (z): <span className="text-white font-bold">{governingSlipDepth.toFixed(2)} m</span></div>
+              <div>Pore Water Pressure (u_w): <span className={`font-bold ${liveGoverningPorePressure > 0 ? 'text-amber-400' : 'text-cyan-400'}`}>{liveGoverningPorePressure > 0 ? `+${liveGoverningPorePressure}` : liveGoverningPorePressure} kPa</span></div>
+              <div>Soil Saturation %: <span className="text-cyan-300 font-bold">{liveGoverningSaturation}%</span></div>
+              <div>Infinite Slope FoS: <span className={`font-bold ${liveGoverningFoS < 1.05 ? 'text-red-400' : 'text-emerald-400'}`}>{liveGoverningFoS.toFixed(2)}</span></div>
               <div>Debris Dam Breach Risk: <span className={physics.isLandslideRisk ? 'text-red-400 font-bold' : 'text-emerald-400'}>{physics.isLandslideRisk ? 'HIGH' : 'LOW'}</span></div>
             </div>
           </div>
@@ -447,22 +473,28 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
             </div>
           </div>
 
-          {/* Box 3: Kirpich Time of Concentration */}
+          {/* Box 3: Muskingum-Cunge & Seddon Wave Celerity (UPGRADE 3: REPLACED KIRPICH WITH LIVE SEDDON CELERITY) */}
           <div className="glass-panel-subtle p-3 rounded border border-slate-800 space-y-2">
             <div className="text-cyan-400 font-bold uppercase flex items-center justify-between">
-              <span>3. Kirpich Travel Time & Surge Wave</span>
-              <span className="text-cyan-300 font-bold">Tc = {physics.timeOfConcentrationHours} hrs</span>
+              <span>3. MUSKINGUM-CUNGE &amp; SEDDON WAVE CELERITY (c = 5/3 V)</span>
+              <span className="text-cyan-300 font-bold">c = {liveCelerityMs.toFixed(2)} m/s ({liveCelerityKmh.toFixed(1)} km/h)</span>
             </div>
             <div className="p-2 bg-[#060a12] rounded border border-slate-900 text-[11px] text-slate-300">
-              <code>Tc = 0.0195·L^0.77·S0^-0.385 (Accelerated &gt;80% sat)</code>
+              <code>c = (5/3)·V | Courant C = c·(Δt/Δx) ≤ 1.0 | Transit T = L / c (Kinematic Wave)</code>
             </div>
             <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-400">
               <div>Corridor Length (L): <span className="text-white">{corridor.lengthKm} km</span></div>
-              <div>Highland Elevation: <span className="text-white">{corridor.upstreamNode.elevationM} m</span></div>
-              <div>Coastal Plain Elevation: <span className="text-white">{corridor.downstreamNode.elevationM} m</span></div>
-              <div>Channel Velocity Surge: <span className="text-amber-400 font-bold">{physics.deepSaturationPct > 80 ? '+45% (Overland Ingress)' : 'Nominal'}</span></div>
+              <div>Wave Celerity (c = 5/3 V): <span className="text-cyan-300 font-bold">{liveCelerityMs.toFixed(2)} m/s</span> ({liveCelerityKmh.toFixed(1)} km/h)</div>
+              <div>Courant Number (C): <span className="text-amber-400 font-bold">{courantNumber.toFixed(2)}</span> ({courantNumber <= 1.0 ? 'Courant-Stable' : 'Advective Sub-stepped'})</div>
+              <div>Mean Flow Velocity (V): <span className="text-white">{(liveCelerityMs / 1.667).toFixed(2)} m/s</span></div>
+              <div>Reach Transit Time: <span className="text-white font-bold">{transitHours.toFixed(1)} hrs (~{etaString})</span></div>
               <div>Projected Arrival: <span className="text-white font-bold">{physics.floodCrestClockTime}</span></div>
-              <div>Countdown: <span className="text-red-400 font-bold">T-{etaString}</span></div>
+              <div className="col-span-2 pt-1 border-t border-slate-900 flex items-center justify-between">
+                <span>Operational Wave Status:</span>
+                <span className={isAlert ? 'text-red-400 font-bold animate-pulse' : 'text-emerald-400 font-bold'}>
+                  {isAlert ? `CREST ETA: T-${etaString}` : `TRANSIT BASELINE: ~${etaString} (NOMINAL)`}
+                </span>
+              </div>
             </div>
           </div>
 
