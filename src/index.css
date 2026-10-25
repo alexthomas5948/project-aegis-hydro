@@ -1,0 +1,177 @@
+@import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+@layer base {
+  :root {
+    --font-chakra: 'Chakra Petch', sans-serif;
+    --font-rajdhani: 'Rajdhani', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: 'Inter', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #050811;
+    color: #e2e8f0;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  /* Custom military tactical scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #090e1a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1e293b;
+    border-radius: 3px;
+    border: 1px solid #334155;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #06b6d4;
+  }
+}
+
+.font-chakra {
+  font-family: 'Chakra Petch', sans-serif;
+}
+.font-rajdhani {
+  font-family: 'Rajdhani', sans-serif;
+}
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Tactical Grid & Radar background effects */
+.bg-tactical-grid {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(6, 182, 212, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(6, 182, 212, 0.05) 1px, transparent 1px);
+}
+
+.bg-dots-pattern {
+  background-image: radial-gradient(rgba(6, 182, 212, 0.15) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* Glow effects */
+.glow-cyan {
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.35), inset 0 0 15px rgba(6, 182, 212, 0.1);
+}
+.glow-amber {
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.35), inset 0 0 15px rgba(245, 158, 11, 0.1);
+}
+.glow-red {
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.45), inset 0 0 15px rgba(239, 68, 68, 0.15);
+}
+
+.text-glow-cyan {
+  text-shadow: 0 0 8px rgba(6, 182, 212, 0.7);
+}
+.text-glow-red {
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.85);
+}
+.text-glow-amber {
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+}
+
+/* Glass panel */
+.glass-panel {
+  background: rgba(10, 16, 30, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(30, 41, 59, 0.8);
+}
+.glass-panel-subtle {
+  background: rgba(13, 21, 38, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+}
+
+/* Animations */
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.04);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(1000%);
+  }
+}
+
+.scanline-effect {
+  position: relative;
+  overflow: hidden;
+}
+.scanline-effect::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.6), transparent);
+  animation: scanline 6s linear infinite;
+  pointer-events: none;
+}
+
+/* MapLibre Dark Tactical overrides */
+.maplibregl-popup-content {
+  background: #090e1a !important;
+  color: #e2e8f0 !important;
+  border: 1px solid #06b6d4 !important;
+  border-radius: 6px !important;
+  padding: 10px 14px !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 10px rgba(6, 182, 212, 0.3) !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 12px !important;
+}
+.maplibregl-popup-anchor-top .maplibregl-popup-tip {
+  border-bottom-color: #06b6d4 !important;
+}
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip {
+  border-top-color: #06b6d4 !important;
+}
+.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: #06b6d4 !important;
+}
+.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: #06b6d4 !important;
+}
+.maplibregl-popup-close-button {
+  color: #94a3b8 !important;
+  padding: 4px 8px !important;
+}
+.maplibregl-popup-close-button:hover {
+  color: #06b6d4 !important;
+  background: transparent !important;
+}
+.maplibregl-ctrl-group {
+  background: #090e1a !important;
+  border: 1px solid #1e293b !important;
+}
+.maplibregl-ctrl-group button {
+  border-bottom: 1px solid #1e293b !important;
+}
+.maplibregl-ctrl-group button:hover {
+  background-color: #1e293b !important;
+}
+.maplibregl-ctrl-icon {
+  filter: invert(1) hue-rotate(180deg);
+}
