@@ -174,29 +174,34 @@ export function solveIversonPorePressurePDE(
     // Dynamic transient pressure head (meters of water)
     let psi_trans_m = fluxRatio * z_bedrock * R_response;
 
-    // Steady background groundwater head: rises as antecedent saturation increases
+    // Steady background groundwater head: rises only when antecedent saturation > 78% or rain >= 20 mm/hr
     let psi_0_m = 0;
-    const initialWaterTableDepth = Math.max(0.5, z_bedrock * (1 - (antecedentSaturationPct / 100) * 0.8));
-    if (z > initialWaterTableDepth) {
-      psi_0_m = (z - initialWaterTableDepth) * cos2Theta;
+    if (antecedentSaturationPct > 78 || rainMmHr >= 20) {
+      const satExcess = Math.max(0, (antecedentSaturationPct - 75) / 25);
+      const rainExcess = Math.max(0, (rainMmHr - 15) / 35);
+      const waterTableRatio = Math.min(0.9, (satExcess * 0.6) + (rainExcess * 0.4));
+      const initialWaterTableDepth = Math.max(0.4, z_bedrock * (1.0 - waterTableRatio));
+      if (z > initialWaterTableDepth) {
+        psi_0_m = (z - initialWaterTableDepth) * cos2Theta;
+      }
     }
 
     let porePressureKpa = 0;
-    if (z <= Z_f || z > initialWaterTableDepth) {
+    if (antecedentSaturationPct > 78 || rainMmHr >= 20) {
       const totalHeadM = psi_0_m + psi_trans_m;
       porePressureKpa = Number((totalHeadM * GAMMA_W).toFixed(2));
       if (porePressureKpa > maxTransientHeadKpa) maxTransientHeadKpa = porePressureKpa;
     } else {
-      // Matric suction head (negative pore pressure)
-      const suctionRatio = (upstream.saturatedMoistureThetaS - moisture) / (upstream.saturatedMoistureThetaS - upstream.residualMoistureThetaR);
-      const suctionHeadM = -upstream.capillarySuctionPsif * Math.pow(suctionRatio, 1.6);
+      // Matric suction head (negative pore pressure) in calm unsaturated laterite
+      const suctionRatio = (upstream.saturatedMoistureThetaS - moisture) / Math.max(0.05, upstream.saturatedMoistureThetaS - upstream.residualMoistureThetaR);
+      const suctionHeadM = -upstream.capillarySuctionPsif * Math.pow(Math.max(0, suctionRatio), 1.6);
       porePressureKpa = Number((suctionHeadM * GAMMA_W).toFixed(2));
     }
 
     // 3. Stresses & Infinite Slope Factor of Safety FoS(z)
     const gamma_bulk = GAMMA_DRY + moisture * GAMMA_W;
     const totalNormalStress = gamma_bulk * Math.max(0.1, z) * cos2Theta;
-    // Effective normal stress: matric suction provides apparent cohesion via Bishop parameter chi
+    // Effective normal stress: positive pore water pressure reduces effective stress
     const chi = Math.min(1.0, Math.max(0.0, satPct / 100));
     const effectiveNormalStress = Math.max(0.1, totalNormalStress - (chi * Math.max(0, porePressureKpa)));
 
@@ -206,7 +211,8 @@ export function solveIversonPorePressurePDE(
     const fosRaw = z === 0 ? 3.5 : shearStrength / drivingShearStress;
     const fos = Number(Math.max(0.3, Math.min(4.0, fosRaw)).toFixed(2));
 
-    if (z > 0 && fos < minFoS) {
+    // Slip planes occur within the soil mantle above or at the bedrock plane
+    if (z > 0 && z <= z_bedrock + 0.1 && fos < minFoS) {
       minFoS = fos;
       criticalDepthM = z;
     }

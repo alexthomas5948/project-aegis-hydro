@@ -193,17 +193,24 @@ export const SixVectorMultiHazardMatrix: React.FC<SixVectorMultiHazardMatrixProp
                   ? 'bg-red-950/60 border-red-500 ring-1 ring-red-500'
                   : v2.status === 'IMMINENT_DETACHMENT'
                   ? 'bg-amber-950/60 border-amber-500'
+                  : v2.status === 'STABLE_EQUILIBRIUM'
+                  ? 'bg-emerald-950/30 border-emerald-500/40 hover:border-emerald-400'
                   : 'bg-slate-900/60 border-slate-800 hover:border-cyan-800'
               }`}
             >
               <div className="flex items-center justify-between text-xs font-mono mb-2">
-                <span className="text-amber-400 font-bold flex items-center gap-1.5">
-                  <Mountain className="w-4 h-4 text-amber-400" />
+                <span className={`font-bold flex items-center gap-1.5 ${
+                  v2.status === 'FAILURE_OCCURRED' ? 'text-red-400' :
+                  v2.status === 'IMMINENT_DETACHMENT' ? 'text-amber-400' :
+                  'text-emerald-400'
+                }`}>
+                  <Mountain className="w-4 h-4" />
                   VECTOR 2: DEEP URULPOTTAL PDE
                 </span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                   v2.status === 'FAILURE_OCCURRED' ? 'bg-red-950 text-red-300 border border-red-600' :
                   v2.status === 'IMMINENT_DETACHMENT' ? 'bg-amber-950 text-amber-300 border border-amber-600' :
+                  v2.status === 'STABLE_EQUILIBRIUM' ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/60' :
                   'bg-slate-800 text-slate-400'
                 }`}>
                   {v2.status}
@@ -247,25 +254,31 @@ export const SixVectorMultiHazardMatrix: React.FC<SixVectorMultiHazardMatrixProp
               }`}
             >
               <div className="flex items-center justify-between text-xs font-mono mb-2">
-                <span className="text-purple-400 font-bold flex items-center gap-1.5">
-                  <AlertOctagon className="w-4 h-4 text-purple-400" />
+                <span className={`font-bold flex items-center gap-1.5 ${
+                  v3.status === 'CATASTROPHIC_BREACH_ALERT' ? 'text-red-400' : 'text-purple-400'
+                }`}>
+                  <AlertOctagon className="w-4 h-4" />
                   VECTOR 3: LDOF GORGE BREACH
                 </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-purple-300">
-                  W &lt; 45m GORGE
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  v3.status === 'CATASTROPHIC_BREACH_ALERT'
+                    ? 'bg-red-950 text-red-300 border border-red-600'
+                    : 'bg-slate-800 text-purple-300'
+                }`}>
+                  {v3.status === 'CATASTROPHIC_BREACH_ALERT' ? 'BREACH ACTIVE' : 'W < 45m GORGE'}
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-xs font-mono my-2">
                 <div className="p-2 rounded bg-black/40 border border-slate-800/80">
                   <span className="text-slate-400 text-[10px] block">BLOCKAGE PROB.</span>
-                  <span className={`text-sm font-bold ${v3.blockageProbabilityPct > 70 ? 'text-red-400' : 'text-slate-200'}`}>
+                  <span className={`text-sm font-bold ${v3.blockageProbabilityPct > 70 ? 'text-red-400' : v3.blockageProbabilityPct > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
                     {v3.blockageProbabilityPct}%
                   </span>
                 </div>
                 <div className="p-2 rounded bg-black/40 border border-slate-800/80">
                   <span className="text-slate-400 text-[10px] block">FROEHLICH Q_PEAK</span>
-                  <span className="text-sm font-bold text-purple-300">
+                  <span className={`text-sm font-bold ${v3.froehlichPeakDischargeM3s > 0 ? 'text-purple-300' : 'text-slate-400'}`}>
                     {v3.froehlichPeakDischargeM3s} m³/s
                   </span>
                 </div>

@@ -192,25 +192,29 @@ class KeralaMultiHazardEngine {
     const tremorRms = fieldNodeTelemetry ? fieldNodeTelemetry.seismicRms : 0.08;
     const fieldDeltaPitch = fieldNodeTelemetry ? Math.abs(fieldNodeTelemetry.pitchDelta) : 0.0;
 
-    // Tilting the phone by 10°+ or shaking it immediately drives PC FoS below 1.00!
-    const tiltPenalty = fieldNodeTelemetry ? Math.abs(fieldNodeTelemetry.pitchDelta) * 0.045 : 0;
-    const seismicPenalty = fieldNodeTelemetry ? livePga * 3.5 : 0;
+    // Tilting the phone by > 6° or shaking it (PGA > 0.05g) drives FoS below 1.05
+    const tiltPenalty = fieldNodeTelemetry && Math.abs(fieldNodeTelemetry.pitchDelta) > 3.0
+      ? (Math.abs(fieldNodeTelemetry.pitchDelta) - 3.0) * 0.16
+      : 0;
+    const seismicPenalty = fieldNodeTelemetry && livePga > 0.03
+      ? (livePga - 0.03) * 14.0
+      : 0;
     const dynamicFoS = Math.max(0.35, Number((baseFoS - tiltPenalty - seismicPenalty).toFixed(2)));
 
-    const acousticRumbling = (livePga > 0.035 || tremorRms > 0.35 || slopeCreep > 0.15) && soilSaturation > 75;
+    const acousticRumbling = (livePga > 0.05 || tremorRms > 0.45 || slopeCreep > 0.25) && soilSaturation > 80;
 
-    let v2Status: Vector2UrulpottalState['status'] = 'STABLE';
-    let v2Summary = `${corridor.upstreamNode.name} geotechnical shear stress within safe threshold (FoS: ${dynamicFoS.toFixed(2)}).`;
+    let v2Status: Vector2UrulpottalState['status'] = 'STABLE_EQUILIBRIUM';
+    let v2Summary = `${corridor.upstreamNode.name} geotechnical shear stress in stable equilibrium (FoS: ${dynamicFoS.toFixed(2)}).`;
 
     if (dynamicFoS < 1.05) {
       v2Status = 'FAILURE_OCCURRED';
       v2Summary = `CRITICAL URULPOTTAL (DEBRIS FLOW) INITIATED: ${corridor.upstreamNode.name} FoS = ${dynamicFoS.toFixed(2)} < 1.05! Catastrophic shear failure at z = 1.75m. Rapid mass wasting descending into gorge!`;
-    } else if (dynamicFoS < 1.25 || acousticRumbling) {
+    } else if (dynamicFoS < 1.15 || acousticRumbling || (rainfallMmHr >= 20 && dynamicFoS < 1.25)) {
       v2Status = 'IMMINENT_DETACHMENT';
       v2Summary = `WATCH (MARGINAL) DETACHMENT ALERT for ${corridor.upstreamNode.name}: Subsurface shear strain detected. FoS: ${dynamicFoS.toFixed(2)}.`;
     } else {
-      v2Status = 'STABLE';
-      v2Summary = `${corridor.upstreamNode.name} slope stability nominal with Infinite Slope FoS = ${dynamicFoS.toFixed(2)}.`;
+      v2Status = 'STABLE_EQUILIBRIUM';
+      v2Summary = `${corridor.upstreamNode.name} slope stability nominal in stable equilibrium with Infinite Slope FoS = ${dynamicFoS.toFixed(2)}.`;
     }
 
     const vector2Urulpottal: Vector2UrulpottalState = {
@@ -239,36 +243,39 @@ class KeralaMultiHazardEngine {
       : 'Sabarimala Forest Gorge Bottleneck';
 
     const channelWidthM = corridor.id === 'meenachil' ? 28.0 : corridor.id === 'chaliyar' ? 34.0 : 42.0;
-    let blockageProb = 5.0;
-    if (dynamicFoS < 1.05) {
-      blockageProb = 95.0;
-    } else if (dynamicFoS < 1.25) {
-      blockageProb = Math.min(90, Math.round((1.25 - dynamicFoS) * 350));
-    } else if (dynamicFoS < 1.35) {
-      blockageProb = 25.0;
-    }
-
-    // Debris dam height Hd & Impoundment volume Vw (m3)
-    const debrisDamHeight = dynamicFoS < 1.05 ? 18.5 : 8.0;
-    const impoundmentVolume = dynamicFoS < 1.05 ? Math.round(250000 + (rainfallMmHr * 2500)) : 35000;
-
-    // Froehlich (1995/2008) Embankment Breach Peak Equation:
-    // Q_peak = 0.607 * (V_w ^ 0.295) * (H_d ^ 1.24)
-    const froehlichPeak = parseFloat((0.607 * Math.pow(impoundmentVolume, 0.295) * Math.pow(debrisDamHeight, 1.24)).toFixed(1));
-    const downstreamEta = dynamicFoS < 1.05 ? Math.round(physics?.floodCrestEtaMinutes ? physics.floodCrestEtaMinutes * 0.4 : 24) : 65;
+    let blockageProb = 0.0;
+    let debrisDamHeight = 0.0;
+    let impoundmentVolume = 0;
+    let froehlichPeak = 0.0;
+    let downstreamEta = 0;
 
     let v3Status: Vector3LDOFState['status'] = 'NORMAL';
-    let v3Summary = `${gorgeName} channel free flowing; no debris damming detected.`;
+    let v3Summary = `${gorgeName} gorge channel clear and unobstructed at 0% blockage probability (0.0 m³/s breach flux).`;
 
-    if (dynamicFoS < 1.05 && blockageProb >= 80) {
+    if (dynamicFoS < 1.05) {
+      blockageProb = 95.0;
+      debrisDamHeight = 18.5;
+      impoundmentVolume = Math.round(250000 + (rainfallMmHr * 2500));
+      froehlichPeak = parseFloat((0.607 * Math.pow(impoundmentVolume, 0.295) * Math.pow(debrisDamHeight, 1.24)).toFixed(1));
+      downstreamEta = Math.round(physics?.floodCrestEtaMinutes ? physics.floodCrestEtaMinutes * 0.4 : 24);
       v3Status = 'CATASTROPHIC_BREACH_ALERT';
       v3Summary = `LDOF BREACH ALERT for ${corridor.name}: 18.5m debris dam in ${gorgeName} impounding ${impoundmentVolume.toLocaleString()} m³ has initiated overtopping breach! Froehlich peak outburst: ${froehlichPeak} m³/s hitting ${corridor.downstreamNode.name} in T+${downstreamEta}m!`;
-    } else if (dynamicFoS < 1.25) {
+    } else if (dynamicFoS < 1.15 || (rainfallMmHr >= 20 && dynamicFoS < 1.25)) {
+      blockageProb = Math.min(75, Math.round((1.25 - dynamicFoS) * 350));
+      debrisDamHeight = 6.0;
+      impoundmentVolume = 25000;
+      froehlichPeak = parseFloat((0.607 * Math.pow(impoundmentVolume, 0.295) * Math.pow(debrisDamHeight, 1.24)).toFixed(1));
+      downstreamEta = 65;
       v3Status = 'IMPOUNDMENT_FORMING';
-      v3Summary = `Gorge choking underway at ${gorgeName} (W=${channelWidthM}m). Impoundment volume climbing rapidly.`;
-    } else if (blockageProb > 20) {
-      v3Status = 'POTENTIAL_DAMMING';
-      v3Summary = `Potential debris damming in ${gorgeName} if upstream detachment propagates. Blockage probability: ${blockageProb}%.`;
+      v3Summary = `Gorge choking underway at ${gorgeName} (W=${channelWidthM}m). Impoundment volume climbing.`;
+    } else {
+      blockageProb = 0.0;
+      debrisDamHeight = 0.0;
+      impoundmentVolume = 0;
+      froehlichPeak = 0.0;
+      downstreamEta = 0;
+      v3Status = 'NORMAL';
+      v3Summary = `${gorgeName} gorge channel free-flowing at 0% blockage probability (0.0 m³/s breach flux); no landslide detachment present.`;
     }
 
     const vector3LDOF: Vector3LDOFState = {
@@ -476,8 +483,8 @@ class KeralaMultiHazardEngine {
         label: 'V1: Orographic Cloudburst',
         vectorIndex: 1,
         active: v1Status === 'CRITICAL_PRECURSOR' || v1Status === 'BURST_ACTIVE',
-        probability: v1Status === 'BURST_ACTIVE' ? 1.0 : v1Status === 'CRITICAL_PRECURSOR' ? 0.88 : 0.25,
-        leadTime: v1Status === 'BURST_ACTIVE' ? 'NOW' : 'T-2.2h',
+        probability: v1Status === 'BURST_ACTIVE' ? 1.0 : v1Status === 'CRITICAL_PRECURSOR' ? 0.88 : 0.05,
+        leadTime: v1Status === 'BURST_ACTIVE' ? 'NOW' : v1Status === 'CRITICAL_PRECURSOR' ? 'T-2.2h' : 'NOMINAL',
         severity: v1Status === 'BURST_ACTIVE' ? 'CRITICAL' : v1Status === 'CRITICAL_PRECURSOR' ? 'HIGH' : 'LOW',
         statusText: v1Status
       },
@@ -486,9 +493,9 @@ class KeralaMultiHazardEngine {
         label: 'V2: Deep Urulpottal (Debris Flow)',
         vectorIndex: 2,
         active: v2Status === 'IMMINENT_DETACHMENT' || v2Status === 'FAILURE_OCCURRED',
-        probability: v2Status === 'FAILURE_OCCURRED' ? 1.0 : v2Status === 'IMMINENT_DETACHMENT' ? 0.92 : 0.35,
-        leadTime: v2Status === 'FAILURE_OCCURRED' ? 'ACTIVE' : 'T-15min',
-        severity: v2Status === 'FAILURE_OCCURRED' ? 'CRITICAL' : v2Status === 'IMMINENT_DETACHMENT' ? 'CRITICAL' : 'MEDIUM',
+        probability: v2Status === 'FAILURE_OCCURRED' ? 1.0 : v2Status === 'IMMINENT_DETACHMENT' ? 0.92 : 0.04,
+        leadTime: v2Status === 'FAILURE_OCCURRED' ? 'ACTIVE' : v2Status === 'IMMINENT_DETACHMENT' ? 'T-15min' : 'NOMINAL',
+        severity: v2Status === 'FAILURE_OCCURRED' ? 'CRITICAL' : v2Status === 'IMMINENT_DETACHMENT' ? 'HIGH' : 'LOW',
         statusText: v2Status
       },
       {
@@ -496,9 +503,9 @@ class KeralaMultiHazardEngine {
         label: 'V3: Gorge Dam Breach (LDOF)',
         vectorIndex: 3,
         active: v3Status === 'CATASTROPHIC_BREACH_ALERT' || v3Status === 'IMPOUNDMENT_FORMING',
-        probability: v3Status === 'CATASTROPHIC_BREACH_ALERT' ? 0.95 : v3Status === 'IMPOUNDMENT_FORMING' ? 0.70 : 0.15,
-        leadTime: `T+${downstreamEta}m`,
-        severity: v3Status === 'CATASTROPHIC_BREACH_ALERT' ? 'CRITICAL' : 'MEDIUM',
+        probability: v3Status === 'CATASTROPHIC_BREACH_ALERT' ? 0.95 : v3Status === 'IMPOUNDMENT_FORMING' ? 0.70 : 0.0,
+        leadTime: v3Status === 'CATASTROPHIC_BREACH_ALERT' ? `T+${downstreamEta}m` : 'NONE',
+        severity: v3Status === 'CATASTROPHIC_BREACH_ALERT' ? 'CRITICAL' : v3Status === 'IMPOUNDMENT_FORMING' ? 'MEDIUM' : 'LOW',
         statusText: v3Status
       },
       {
@@ -506,8 +513,8 @@ class KeralaMultiHazardEngine {
         label: 'V4: Reservoir Rule Spillway',
         vectorIndex: 4,
         active: v4Status === 'EMERGENCY_SPILLWAY_ACTIVE',
-        probability: hasRedAlertDam ? 0.90 : 0.40,
-        leadTime: `T+${minHoursToRed.toFixed(1)}h`,
+        probability: hasRedAlertDam ? 0.90 : 0.08,
+        leadTime: hasRedAlertDam ? `T+${minHoursToRed.toFixed(1)}h` : 'SAFE CUSHION',
         severity: hasRedAlertDam ? 'HIGH' : 'LOW',
         statusText: v4Status
       },
@@ -516,9 +523,9 @@ class KeralaMultiHazardEngine {
         label: 'V5: 20-Reach Fluvial Surge',
         vectorIndex: 5,
         active: v5Status === 'EXTREME_FLIGHT_WARNING' || v5Status === 'OVERBANK_DISCHARGE',
-        probability: totalHeadwaterSurge > 2500 ? 0.94 : 0.50,
+        probability: totalHeadwaterSurge > dangerDischarge * 0.9 ? 0.94 : 0.10,
         leadTime: `T+${crestTravelTimeHours}h`,
-        severity: totalHeadwaterSurge > 2500 ? 'CRITICAL' : 'HIGH',
+        severity: totalHeadwaterSurge > dangerDischarge ? 'CRITICAL' : totalHeadwaterSurge > dangerDischarge * 0.7 ? 'HIGH' : 'LOW',
         statusText: v5Status
       },
       {
@@ -526,20 +533,20 @@ class KeralaMultiHazardEngine {
         label: 'V6: Estuarine Tidal Lock',
         vectorIndex: 6,
         active: v6Status === 'CATASTROPHIC_BACKWATER' || v6Status === 'SEVERE_TIDAL_LOCKING',
-        probability: blockageIndex >= 65 ? 0.88 : 0.30,
+        probability: blockageIndex >= 65 ? 0.88 : 0.12,
         leadTime: 'HIGH TIDE PHASE',
-        severity: blockageIndex >= 70 ? 'CRITICAL' : 'MEDIUM',
+        severity: blockageIndex >= 70 ? 'CRITICAL' : blockageIndex >= 45 ? 'MEDIUM' : 'LOW',
         statusText: v6Status
       }
     ];
 
     const faultEdges: CascadingFaultEdge[] = [
       { from: 'node_cloudburst', to: 'node_urulpottal', label: 'Infiltration Pore Surge', probability: 0.88, active: v1Status === 'BURST_ACTIVE' || v1Status === 'CRITICAL_PRECURSOR' },
-      { from: 'node_urulpottal', to: 'node_ldof', label: 'Narrow Gorge Choke (W<45m)', probability: blockageProb / 100, active: dynamicFoS < 1.10 },
+      { from: 'node_urulpottal', to: 'node_ldof', label: 'Narrow Gorge Choke (W<45m)', probability: blockageProb / 100, active: dynamicFoS < 1.05 },
       { from: 'node_cloudburst', to: 'node_dam_spill', label: 'Inflow Surpassing Rule Curve', probability: 0.75, active: rainfallMmHr > 40 },
       { from: 'node_ldof', to: 'node_fluvial_surge', label: 'Outburst Peak Froehlich Wave', probability: 0.95, active: v3Status === 'CATASTROPHIC_BREACH_ALERT' },
       { from: 'node_dam_spill', to: 'node_fluvial_surge', label: 'Spillway Gate Pre-Release', probability: 0.85, active: v4Status === 'EMERGENCY_SPILLWAY_ACTIVE' },
-      { from: 'node_fluvial_surge', to: 'node_tidal_lock', label: 'Drainage Barricade by Sea Surge', probability: blockageIndex / 100, active: blockageIndex > 50 }
+      { from: 'node_fluvial_surge', to: 'node_tidal_lock', label: 'Drainage Barricade by Sea Surge', probability: blockageIndex / 100, active: blockageIndex > 60 }
     ];
 
     // Compute Overall Composite Cascading Risk Index (0 - 100)
@@ -548,9 +555,11 @@ class KeralaMultiHazardEngine {
     else if (v1Status === 'CRITICAL_PRECURSOR') cascadeScore += 18;
 
     if (v2Status === 'FAILURE_OCCURRED') cascadeScore += 30;
-    else if (v2Status === 'IMMINENT_DETACHMENT') cascadeScore += 22;
+    else if (v2Status === 'IMMINENT_DETACHMENT') cascadeScore += 20;
 
     if (v3Status === 'CATASTROPHIC_BREACH_ALERT') cascadeScore += 20;
+    else if (v3Status === 'IMPOUNDMENT_FORMING') cascadeScore += 10;
+
     if (v4Status === 'EMERGENCY_SPILLWAY_ACTIVE') cascadeScore += 10;
     if (v5Status === 'EXTREME_FLIGHT_WARNING') cascadeScore += 15;
     if (v6Status === 'CATASTROPHIC_BACKWATER') cascadeScore += 12;
@@ -560,76 +569,83 @@ class KeralaMultiHazardEngine {
     // -----------------------------------------------------------------------
     // 14 KERALA DISTRICTS MULTI-HAZARD RISK ASSIGNMENT
     // -----------------------------------------------------------------------
+    const calcDistrictTier = (risk: number, isCriticalTrigger: boolean): HazardTier => {
+      if (isCriticalTrigger || risk >= 75) return 'CRITICAL';
+      if (risk >= 55) return 'WARNING';
+      if (risk >= 35) return 'ADVISORY';
+      return 'NORMAL';
+    };
+
     const districtHazards: Record<string, { overallRisk: number; primaryHazard: string; hazardLevel: HazardTier }> = {
       'Wayanad': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 1.15)),
         primaryHazard: 'Urulpottal Debris Flow & Gorge Damming',
-        hazardLevel: dynamicFoS < 1.05 ? 'CRITICAL' : 'WARNING'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 1.15), dynamicFoS < 1.05)
       },
       'Idukki': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 1.10)),
         primaryHazard: 'Steep Slope Slip & Spillway Overtopping',
-        hazardLevel: dynamicFoS < 1.10 || hasRedAlertDam ? 'CRITICAL' : 'WARNING'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 1.10), dynamicFoS < 1.05 || hasRedAlertDam)
       },
       'Pathanamthitta': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.95)),
         primaryHazard: 'Pamba Fluvial Surge & Sabarimala Gorge Choke',
-        hazardLevel: totalHeadwaterSurge > 1800 ? 'CRITICAL' : 'WARNING'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.95), totalHeadwaterSurge > dangerDischarge)
       },
       'Ernakulam': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.90)),
         primaryHazard: 'Aluva Floodplain Inundation & Kochi Backwater',
-        hazardLevel: totalHeadwaterSurge > 2200 || blockageIndex > 70 ? 'CRITICAL' : 'WARNING'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.90), totalHeadwaterSurge > dangerDischarge || blockageIndex > 75)
       },
       'Alappuzha': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.92)),
         primaryHazard: 'Kuttanad Below-Sea-Level Tidal Locking',
-        hazardLevel: blockageIndex > 65 ? 'CRITICAL' : 'WARNING'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.92), blockageIndex > 75)
       },
       'Kottayam': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.82)),
         primaryHazard: 'Meenachil River Surge & Polder Stagnation',
-        hazardLevel: 'WARNING'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.82), false)
       },
       'Thrissur': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.78)),
         primaryHazard: 'Chalakudy River Lowland Inundation',
-        hazardLevel: 'WARNING'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.78), false)
       },
       'Malappuram': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.85)),
         primaryHazard: 'Chaliyar Highland Slope Failure',
-        hazardLevel: dynamicFoS < 1.10 ? 'CRITICAL' : 'WARNING'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.85), dynamicFoS < 1.05)
       },
       'Kozhikode': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.75)),
         primaryHazard: 'Feroke Estuary High Tide Inundation',
-        hazardLevel: 'WARNING'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.75), false)
       },
       'Palakkad': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.65)),
         primaryHazard: 'Bharathapuzha Basin Runoff',
-        hazardLevel: 'ADVISORY'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.65), false)
       },
       'Kannur': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.60)),
         primaryHazard: 'Highland Flash Floods',
-        hazardLevel: 'ADVISORY'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.60), false)
       },
       'Kasaragod': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.55)),
         primaryHazard: 'Coastal River Egress Slowdown',
-        hazardLevel: 'ADVISORY'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.55), false)
       },
       'Kollam': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.68)),
         primaryHazard: 'Kallada River Surge',
-        hazardLevel: 'ADVISORY'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.68), false)
       },
       'Thiruvananthapuram': {
         overallRisk: Math.min(100, Math.round(overallCascadeRiskIndex * 0.58)),
         primaryHazard: 'Neyyar River & Lowland Waterlogging',
-        hazardLevel: 'ADVISORY'
+        hazardLevel: calcDistrictTier(Math.round(overallCascadeRiskIndex * 0.58), false)
       }
     };
 

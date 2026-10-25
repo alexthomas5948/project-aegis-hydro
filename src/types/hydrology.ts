@@ -334,7 +334,7 @@ export interface Vector2UrulpottalState {
   livePgaG: number;
   slopeCreepDegHr: number;
   seismicTremorRms: number;
-  status: 'STABLE' | 'PRE_RUPTURE_WARNING' | 'IMMINENT_DETACHMENT' | 'FAILURE_OCCURRED';
+  status: 'STABLE' | 'STABLE_EQUILIBRIUM' | 'PRE_RUPTURE_WARNING' | 'IMMINENT_DETACHMENT' | 'FAILURE_OCCURRED';
   acousticRumblingDetected: boolean;
   summary: string;
 }

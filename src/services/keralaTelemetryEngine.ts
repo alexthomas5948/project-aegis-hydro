@@ -58,7 +58,7 @@ class KeralaTelemetryEngine {
     downstream: TelemetryDownstream,
     activeScenario?: string
   ): CorridorTelemetryState {
-    const physics = evaluateCorridorPhysics(corridor, upstream, downstream, now);
+    const physics = evaluateCorridorPhysics(corridor, upstream, downstream, now, isSimulated, upstream.soilSaturationPct);
     const hourlySeries = generate24HourHydrograph(corridor, physics, upstream.precipitationCurrentMm, downstream.dischargeM3s);
     const { facilities, routes } = evaluateInfrastructureImpact(
       corridor.id,
@@ -93,24 +93,24 @@ class KeralaTelemetryEngine {
     for (const corridor of KERALA_CORRIDORS) {
       // Nominal seasonal baseline values
       const upstream: TelemetryUpstream = {
-        precipitationCurrentMm: 4.2,
-        rainHourlyMm: [1.2, 2.0, 3.5, 4.2, 3.8, 2.9, 1.5],
-        soilMoisture0to7cm: 0.28,
-        soilMoisture7to28cm: 0.31,
-        soilMoisture28to100cm: 0.33,
-        weightedMoisture: 0.315,
-        soilSaturationPct: 68.5,
+        precipitationCurrentMm: 2.4,
+        rainHourlyMm: [0.8, 1.2, 1.8, 2.4, 2.0, 1.5, 0.9],
+        soilMoisture0to7cm: 0.32,
+        soilMoisture7to28cm: 0.35,
+        soilMoisture28to100cm: 0.38,
+        weightedMoisture: 0.35,
+        soilSaturationPct: 52.4,
         surfacePressureHpa: 1012.4,
-        windSpeedKmh: 14.8,
+        windSpeedKmh: 12.5,
         damDischargeReleaseM3s: 0
       };
 
-      const discharge = Math.round(corridor.downstreamNode.baseDischarge * 1.35);
-      const stageM = Number((corridor.downstreamNode.baseStageM + 0.4).toFixed(2));
+      const discharge = Math.round(corridor.downstreamNode.baseDischarge * 1.05);
+      const stageM = Number((corridor.downstreamNode.baseStageM + 0.1).toFixed(2));
       const downstream: TelemetryDownstream = {
         dischargeM3s: discharge,
         dischargeMedianM3s: corridor.downstreamNode.baseDischarge,
-        dischargeMaxM3s: Math.round(corridor.downstreamNode.warningDischarge * 0.9),
+        dischargeMaxM3s: Math.round(corridor.downstreamNode.warningDischarge * 0.75),
         stageHeightM: stageM,
         inundationRadiusKm: calculateInundationRadiusKm(
           discharge,
@@ -289,7 +289,14 @@ class KeralaTelemetryEngine {
       }
     }
 
-    const { saturationPct, weightedMoisture } = calculateSoilSaturation(sm0_7, sm7_28, sm28_100);
+    const { saturationPct, weightedMoisture } = calculateSoilSaturation(
+      sm0_7,
+      sm7_28,
+      sm28_100,
+      precip,
+      this.simulationConfig.active,
+      this.simulationConfig.antecedentSoilMoisturePct
+    );
 
     const upstream: TelemetryUpstream = {
       precipitationCurrentMm: precip,

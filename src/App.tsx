@@ -89,20 +89,9 @@ export function App() {
     // Start 60-second polling
     telemetryEngine.startPolling(60000);
 
-    // Subscribe to telemetry state
+    // Subscribe to telemetry state (Manual dispatch only: do not auto-open modal or auto-play voice on polling)
     const unsubscribeTelemetry = telemetryEngine.subscribe((snapshot) => {
       setTelemetryMap(snapshot);
-
-      // Check if any corridor has triggered a critical threshold (DRI >= 80 or FoS < 1.05)
-      for (const corridor of KERALA_CORRIDORS) {
-        const state = snapshot[corridor.id];
-        if (state) {
-          const alert = voiceDispatchEngine.evaluateStateForAlert(corridor, state);
-          if (alert && !activeEmergencyAlert) {
-            setActiveEmergencyAlert(alert);
-          }
-        }
-      }
     });
 
     // Subscribe to voice dispatch alerts
@@ -180,17 +169,22 @@ export function App() {
     if (!current) return telemetryMap;
 
     const calculatedSatelliteFoS = current.physics.factorOfSafety;
-    // Tilting the phone by 10°+ or shaking it immediately drives PC FoS below 1.00!
-    const tiltPenalty = Math.abs(livePhoneData.tiltDeltaDeg) * 0.045;
-    const seismicPenalty = livePhoneData.seismicPgaG * 3.5;
+    // When tilt delta < 3° and pga < 0.03g, slopes remain completely nominal.
+    // When tiltDeltaDeg > 6° or seismicPgaG > 0.05g, FoS drops below 1.05 (CRITICAL RED ALERT).
+    const tiltPenalty = Math.abs(livePhoneData.tiltDeltaDeg) > 3.0
+      ? (Math.abs(livePhoneData.tiltDeltaDeg) - 3.0) * 0.16
+      : 0;
+    const seismicPenalty = livePhoneData.seismicPgaG > 0.03
+      ? (livePhoneData.seismicPgaG - 0.03) * 14.0
+      : 0;
     const liveHardwareFoS = Math.max(0.35, Number((calculatedSatelliteFoS - tiltPenalty - seismicPenalty).toFixed(2)));
 
     const overrideSaturation = livePhoneData.simulatedMoisturePct !== null
       ? livePhoneData.simulatedMoisturePct
       : current.physics.deepSaturationPct;
 
-    const isCritical = liveHardwareFoS < 1.05 || livePhoneData.seismicPgaG > 0.08;
-    const isWarning = liveHardwareFoS < 1.25 || Math.abs(livePhoneData.tiltDeltaDeg) > 2.0;
+    const isCritical = liveHardwareFoS < 1.05 || Math.abs(livePhoneData.tiltDeltaDeg) > 6.0 || livePhoneData.seismicPgaG > 0.05;
+    const isWarning = !isCritical && (liveHardwareFoS < 1.25 || Math.abs(livePhoneData.tiltDeltaDeg) >= 3.0 || livePhoneData.seismicPgaG > 0.035);
     const hazardTier = isCritical ? 'CRITICAL' : isWarning ? 'WARNING' : current.physics.hazardTier;
     const dynamicRiskIndex = isCritical ? Math.max(88, current.physics.dynamicRiskIndex) : current.physics.dynamicRiskIndex;
 

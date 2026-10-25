@@ -37,41 +37,8 @@ interface Aegis3DMapProps {
   onSelectCorridor: (id: string) => void;
 }
 
-const FREE_DARK_3D_STYLE = {
-  version: 8 as const,
-  sources: {
-    'carto-dark': {
-      type: 'raster' as const,
-      tiles: [
-        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
-      ],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors © CARTO'
-    },
-    'aws-terrain': {
-      type: 'raster-dem' as const,
-      tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      encoding: 'terrarium' as const,
-      maxzoom: 14
-    }
-  },
-  terrain: {
-    source: 'aws-terrain',
-    exaggeration: 1.6
-  },
-  layers: [
-    {
-      id: 'carto-dark-layer',
-      type: 'raster' as const,
-      source: 'carto-dark',
-      minzoom: 0,
-      maxzoom: 22
-    }
-  ]
-};
+// 100% free keyless dark vector map style from OpenFreeMap (Zero watermarks, Cloudflare CDN)
+const FREE_DARK_3D_STYLE = 'https://tiles.openfreemap.org/styles/dark';
 
 export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
   telemetryMap,
@@ -108,8 +75,17 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
     map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
 
     map.on('load', () => {
-      // 1. Enable 3D Terrain
+      // 1. Add AWS Terrarium 3D DEM Source & Enable 3D Elevation
       try {
+        if (!map.getSource('aws-terrain')) {
+          map.addSource('aws-terrain', {
+            type: 'raster-dem',
+            tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            encoding: 'terrarium',
+            maxzoom: 14
+          });
+        }
         map.setTerrain({
           source: 'aws-terrain',
           exaggeration: 1.6
@@ -547,6 +523,15 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
     setTerrainEnabled(nextState);
 
     if (nextState) {
+      if (!map.getSource('aws-terrain')) {
+        map.addSource('aws-terrain', {
+          type: 'raster-dem',
+          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          encoding: 'terrarium',
+          maxzoom: 14
+        });
+      }
       map.setTerrain({ source: 'aws-terrain', exaggeration: 1.6 });
     } else {
       map.setTerrain(null);

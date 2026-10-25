@@ -82,17 +82,12 @@ class VoiceDispatchEngine {
     }
 
     this.notify();
-
-    if (shouldSpeak && !this.isMuted) {
-      this.speakAlert(alert.broadcastMessage);
-      this.recentAnnouncedCorridors.set(corridor.id, now);
-    }
-
+    // Manual dispatch only: Never auto-speak on evaluation or polling!
     return alert;
   }
 
   /**
-   * Manual trigger from user for live hackathon demonstration
+   * Manual trigger from user for preparing emergency dispatch modal and CAP v1.2 payload
    */
   public triggerManualEmergencyAlert(corridor: HydrologicalCorridor, state: CorridorTelemetryState): DispatchVoiceAlert {
     const alert = this.createAlertObject(corridor, state);
@@ -100,10 +95,7 @@ class VoiceDispatchEngine {
     if (this.alerts.length > 20) this.alerts.pop();
     this.notify();
 
-    if (!this.isMuted) {
-      this.speakAlert(alert.broadcastMessage);
-    }
-
+    // Manual dispatch only: Speech only plays when user explicitly clicks SPEAK inside the modal!
     return alert;
   }
 
