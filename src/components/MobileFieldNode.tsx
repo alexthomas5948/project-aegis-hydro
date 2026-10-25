@@ -68,9 +68,11 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
   const seismicHistoryRef = useRef<number[]>(new Array(120).fill(0.015));
   const pitchHistoryRef = useRef<number[]>(new Array(120).fill(18.5));
 
-  // Timestamp of last orientation for calculating delta creep
+  // Timestamp and pitch history for calculating smoothed derivative creep
   const lastTimeRef = useRef<number>(Date.now());
-  const lastPitchRef = useRef<number>(18.5);
+  const lastPitchRef = useRef<number | null>(null);
+  const creepEmaRef = useRef<number>(0.0);
+  const creepHistoryRef = useRef<number[]>([]);
 
   // Initialize WirelessFieldBridge transmitter
   useEffect(() => {
@@ -135,16 +137,43 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
         const rawPitch = e.beta;
         const rawRoll = e.gamma;
         const now = Date.now();
-        const dtHours = Math.max(0.0001, (now - lastTimeRef.current) / (1000 * 3600));
-        const dPitch = rawPitch - lastPitchRef.current;
-        const creep = parseFloat((dPitch / dtHours).toFixed(2));
+
+        if (lastPitchRef.current !== null) {
+          const dtSec = Math.max(0.015, (now - lastTimeRef.current) / 1000);
+          const dPitch = rawPitch - lastPitchRef.current;
+
+          // Instantaneous derivative rate in degrees per hour (°/h)
+          const instantRate = (dPitch / dtSec) * 3600;
+
+          // Rolling window over the last 15 samples
+          creepHistoryRef.current.push(instantRate);
+          if (creepHistoryRef.current.length > 15) {
+            creepHistoryRef.current.shift();
+          }
+
+          // Sample average over the window to damp high-frequency IMU jitter
+          const sampleAvg =
+            creepHistoryRef.current.reduce((sum, val) => sum + val, 0) /
+            creepHistoryRef.current.length;
+
+          // Exponential Moving Average (EMA with alpha = 0.15)
+          const alpha = 0.15;
+          const newEma = alpha * sampleAvg + (1 - alpha) * creepEmaRef.current;
+
+          // Clamp to realistic physical geotechnical ranges (-180°/h to +180°/h)
+          const clampedEma = Math.max(-180, Math.min(180, newEma));
+          creepEmaRef.current = clampedEma;
+
+          setCreepVelocity(parseFloat(clampedEma.toFixed(1)));
+        } else {
+          lastPitchRef.current = rawPitch;
+        }
 
         lastPitchRef.current = rawPitch;
         lastTimeRef.current = now;
 
         setPitch(parseFloat(rawPitch.toFixed(2)));
         setRoll(parseFloat(rawRoll.toFixed(2)));
-        setCreepVelocity(creep);
       }
     };
 
@@ -209,6 +238,7 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
         seismicPgaG: pga,
         seismicRmsMs2: seismicRms,
         simulatedMoisturePct: isSimulatedMode ? poreSaturation : null,
+        creepVelocity,
         timestamp: Date.now()
       };
       bridgeRef.current?.transmitTelemetry(packet);
@@ -291,36 +321,45 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Draw Seismic PGA trace (Red/Amber)
+      // Draw Seismic PGA trace (Red) with auto-ranging
       const seismicData = seismicHistoryRef.current;
-      ctx.beginPath();
-      ctx.strokeStyle = '#ef4444';
-      ctx.lineWidth = 2;
+      const peakPga = Math.max(0.05, ...seismicData);
+      const pgaMax = Math.max(2.5, Math.ceil((peakPga * 1.25) * 2) / 2);
       const stepX = width / (seismicData.length - 1);
+
+      ctx.save();
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = '#ef4444';
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
 
       for (let i = 0; i < seismicData.length; i++) {
         const val = seismicData[i];
-        // Scale: 0 to 0.2g maps to midY to 0
-        const y = Math.max(5, midY - (val / 0.15) * (midY - 10));
+        const y = Math.max(4, midY - (val / pgaMax) * (midY - 8));
         if (i === 0) ctx.moveTo(0, y);
         else ctx.lineTo(i * stepX, y);
       }
       ctx.stroke();
+      ctx.restore();
 
-      // Draw Slope Pitch Delta trace (Cyan)
+      // Draw Slope Pitch Delta trace (Cyan) with auto-ranging
       const pitchData = pitchHistoryRef.current;
-      ctx.beginPath();
+      ctx.save();
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = '#06b6d4';
       ctx.strokeStyle = '#06b6d4';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
 
       for (let i = 0; i < pitchData.length; i++) {
         const val = pitchData[i];
-        // Scale: -5 deg to +5 deg maps across full height
-        const y = midY - (val / 5.0) * (midY - 15);
+        const y = midY - (val / 90.0) * (midY - 12);
         if (i === 0) ctx.moveTo(0, y);
         else ctx.lineTo(i * stepX, y);
       }
       ctx.stroke();
+      ctx.restore();
 
       animId = requestAnimationFrame(renderScope);
     };
@@ -564,7 +603,7 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
             <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono">
               <span className="text-slate-400">Creep Velocity:</span>
               <span className={`font-bold ${Math.abs(creepVelocity) > 0.1 ? 'text-amber-400' : 'text-slate-300'}`}>
-                {creepVelocity >= 0 ? `+${creepVelocity}` : creepVelocity}°/h
+                {creepVelocity >= 0 ? `+${creepVelocity.toFixed(1)}` : creepVelocity.toFixed(1)} °/h
               </span>
             </div>
           </div>

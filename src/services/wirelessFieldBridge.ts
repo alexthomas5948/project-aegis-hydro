@@ -8,6 +8,7 @@ export interface FieldNodeTelemetryPacket {
   seismicPgaG: number;
   seismicRmsMs2: number;
   simulatedMoisturePct: number | null;
+  creepVelocity?: number;
   timestamp: number;
 }
 

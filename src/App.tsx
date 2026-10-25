@@ -61,25 +61,32 @@ export function App() {
     setLivePhoneData(packet);
     setIsHILConnected(true);
 
-    setFieldNodeTelemetry(prev => ({
-      roomId: bridge.roomPin,
-      deviceId: 'HIL-PHONE-NODE-1',
-      timestamp: packet.timestamp,
-      pitch: packet.pitch,
-      roll: packet.roll,
-      pitchDelta: packet.tiltDeltaDeg,
-      rollDelta: packet.roll,
-      creepVelocity: prev ? prev.creepVelocity : 0.02,
-      pga: packet.seismicPgaG,
-      seismicRms: packet.seismicRmsMs2,
-      accelX: parseFloat((packet.seismicPgaG * 9.8).toFixed(2)),
-      accelY: parseFloat((packet.tiltDeltaDeg * 0.1).toFixed(2)),
-      accelZ: 9.81,
-      poreSaturation: packet.simulatedMoisturePct !== null ? packet.simulatedMoisturePct : (prev?.poreSaturation ?? 76.5),
-      stationName: prev?.stationName || 'WAYANAD-CHOORALMALA-SLOPE-1',
-      hazardLevel: Math.abs(packet.tiltDeltaDeg) > 4.5 || packet.seismicPgaG > 0.08 ? 'CRITICAL_FAILURE' : Math.abs(packet.tiltDeltaDeg) > 1.8 ? 'WARNING' : 'STABLE',
-      isSimulated: packet.simulatedMoisturePct !== null
-    }));
+    setFieldNodeTelemetry(prev => {
+      const incomingCreep = packet.creepVelocity !== undefined 
+        ? packet.creepVelocity 
+        : (prev ? prev.creepVelocity : 0.0);
+      const clampedCreep = Math.max(-180, Math.min(180, incomingCreep));
+
+      return {
+        roomId: bridge.roomPin,
+        deviceId: 'HIL-PHONE-NODE-1',
+        timestamp: packet.timestamp,
+        pitch: packet.pitch,
+        roll: packet.roll,
+        pitchDelta: packet.tiltDeltaDeg,
+        rollDelta: packet.roll,
+        creepVelocity: parseFloat(clampedCreep.toFixed(1)),
+        pga: packet.seismicPgaG,
+        seismicRms: packet.seismicRmsMs2,
+        accelX: parseFloat((packet.seismicPgaG * 9.8).toFixed(2)),
+        accelY: parseFloat((packet.tiltDeltaDeg * 0.1).toFixed(2)),
+        accelZ: 9.81,
+        poreSaturation: packet.simulatedMoisturePct !== null ? packet.simulatedMoisturePct : (prev?.poreSaturation ?? 76.5),
+        stationName: prev?.stationName || 'WAYANAD-CHOORALMALA-SLOPE-1',
+        hazardLevel: Math.abs(packet.tiltDeltaDeg) > 4.5 || packet.seismicPgaG > 0.08 || Math.abs(clampedCreep) > 2.0 ? 'CRITICAL_FAILURE' : Math.abs(packet.tiltDeltaDeg) > 1.8 ? 'WARNING' : 'STABLE',
+        isSimulated: packet.simulatedMoisturePct !== null
+      };
+    });
   }, [bridge.roomPin]);
 
   // Initialize telemetry engine & polling loop
