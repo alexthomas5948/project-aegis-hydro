@@ -100,7 +100,7 @@ export const SixVectorMultiHazardMatrix: React.FC<SixVectorMultiHazardMatrixProp
                 <span className={`w-2 h-2 rounded-full ${fieldNodeTelemetry ? 'bg-emerald-400 animate-ping' : 'bg-cyan-400'}`} />
               </div>
               <span className="text-[9px] text-slate-400">
-                {fieldNodeTelemetry ? `PGA: ${fieldNodeTelemetry.pga.toFixed(3)}g | Δβ: ${fieldNodeTelemetry.pitchDelta}°` : 'PAIR ANDROID SENSOR'}
+                {fieldNodeTelemetry ? `PGA: ${fieldNodeTelemetry.pga.toFixed(3)}g | Δθ: ${fieldNodeTelemetry.pitchDelta.toFixed(1)}°` : 'PAIR ANDROID SENSOR'}
               </span>
             </div>
           </button>
@@ -218,7 +218,12 @@ export const SixVectorMultiHazardMatrix: React.FC<SixVectorMultiHazardMatrixProp
                   </span>
                 </div>
                 <div className="p-2 rounded bg-black/40 border border-slate-800/80">
-                  <span className="text-slate-400 text-[10px] block">SEISMIC PGA (g)</span>
+                  <span className="text-slate-400 text-[10px] flex items-center justify-between">
+                    <span>SEISMIC PGA (g)</span>
+                    {fieldNodeTelemetry && (
+                      <span className="text-cyan-400 font-mono text-[9px]">Δθ: {fieldNodeTelemetry.pitchDelta.toFixed(1)}°</span>
+                    )}
+                  </span>
                   <span className={`text-sm font-bold ${v2.livePgaG > 0.04 ? 'text-red-400' : 'text-slate-200'}`}>
                     {v2.livePgaG.toFixed(3)}g
                   </span>

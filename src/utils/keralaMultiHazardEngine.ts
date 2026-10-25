@@ -192,10 +192,10 @@ class KeralaMultiHazardEngine {
     const tremorRms = fieldNodeTelemetry ? fieldNodeTelemetry.seismicRms : 0.08;
     const fieldDeltaPitch = fieldNodeTelemetry ? Math.abs(fieldNodeTelemetry.pitchDelta) : 0.0;
 
-    // Pseudostatic seismic inertial degradation + creep cohesion loss:
-    const seismicInertialPenalty = fieldNodeTelemetry ? livePga * 2.8 : 0;
-    const creepPenalty = fieldNodeTelemetry ? (slopeCreep * 0.12) + (fieldDeltaPitch * 0.04) : 0;
-    const dynamicFoS = Math.max(0.40, parseFloat((baseFoS - seismicInertialPenalty - creepPenalty).toFixed(2)));
+    // Tilting the phone by 10°+ or shaking it immediately drives PC FoS below 1.00!
+    const tiltPenalty = fieldNodeTelemetry ? Math.abs(fieldNodeTelemetry.pitchDelta) * 0.045 : 0;
+    const seismicPenalty = fieldNodeTelemetry ? livePga * 3.5 : 0;
+    const dynamicFoS = Math.max(0.35, Number((baseFoS - tiltPenalty - seismicPenalty).toFixed(2)));
 
     const acousticRumbling = (livePga > 0.035 || tremorRms > 0.35 || slopeCreep > 0.15) && soilSaturation > 75;
 

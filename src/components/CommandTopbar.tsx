@@ -25,6 +25,7 @@ interface CommandTopbarProps {
   onOpenPairingModal: () => void;
   hasCriticalAlert: boolean;
   isHILConnected?: boolean;
+  roomPin?: string;
 }
 
 export const CommandTopbar: React.FC<CommandTopbarProps> = ({
@@ -33,7 +34,8 @@ export const CommandTopbar: React.FC<CommandTopbarProps> = ({
   onOpenVoiceConsole,
   onOpenPairingModal,
   hasCriticalAlert,
-  isHILConnected = false
+  isHILConnected = false,
+  roomPin = '4092'
 }) => {
   const [istTime, setIstTime] = useState('');
   const [utcTime, setUtcTime] = useState('');
@@ -156,12 +158,16 @@ export const CommandTopbar: React.FC<CommandTopbarProps> = ({
           onClick={onOpenPairingModal}
           className={`px-3 py-1.5 rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-all shadow-sm ${
             isHILConnected
-              ? 'bg-emerald-950/80 border border-emerald-500 text-emerald-300'
+              ? 'bg-emerald-950/90 border border-emerald-400 text-emerald-300 shadow-emerald-900/50'
               : 'bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300'
           }`}
         >
-          <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
-          <span>{isHILConnected ? 'FIELD NODE: PAIRED (20Hz)' : 'PAIR FIELD NODE (4092)'}</span>
+          <Smartphone className={`w-3.5 h-3.5 ${isHILConnected ? 'text-emerald-400' : 'text-cyan-400'}`} />
+          <span>
+            {isHILConnected
+              ? `FIELD NODE: LIVE 20Hz (PIN ${roomPin})`
+              : `FIELD NODE: PIN ${roomPin} [PAIRING...]`}
+          </span>
           {isHILConnected && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping ml-0.5" />}
         </button>
 

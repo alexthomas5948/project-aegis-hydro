@@ -16,6 +16,8 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { fieldSensorSync } from '../services/fieldSensorSync';
+import { WirelessFieldBridge } from '../services/wirelessFieldBridge';
+import type { FieldNodeTelemetryPacket } from '../services/wirelessFieldBridge';
 import type { FieldNodeTelemetry } from '../types/hydrology';
 
 interface MobileFieldNodeProps {
@@ -27,6 +29,22 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
   pin = '4092',
   onExit
 }) => {
+  // Read PIN from URL query param ?pin= or ?room= if present, else prop
+  const resolvedPin = (() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlPin = urlParams.get('pin') || urlParams.get('room');
+      if (urlPin) return urlPin;
+    }
+    return pin || '4092';
+  })();
+
+  const [activePin, setActivePin] = useState<string>(resolvedPin);
+  const [pinInput, setPinInput] = useState<string>(resolvedPin);
+  const [isWebRtcConnected, setIsWebRtcConnected] = useState<boolean>(false);
+  const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const bridgeRef = useRef<WirelessFieldBridge | null>(null);
+
   // Calibration baseline tare offsets
   const [pitchTare, setPitchTare] = useState<number>(0);
   const [rollTare, setRollTare] = useState<number>(0);
@@ -42,7 +60,7 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
   const [isCalibrated, setIsCalibrated] = useState<boolean>(false);
   const [sensorPermissionGranted, setSensorPermissionGranted] = useState<boolean>(false);
   const [isSimulatedMode, setIsSimulatedMode] = useState<boolean>(false);
-  const [activeTransport, setActiveTransport] = useState<string>('broadcast_channel');
+  const [activeTransport, setActiveTransport] = useState<string>('webrtc_peer');
   const [packetCount, setPacketCount] = useState<number>(0);
 
   // Oscilloscope canvas reference
@@ -54,18 +72,39 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
   const lastTimeRef = useRef<number>(Date.now());
   const lastPitchRef = useRef<number>(18.5);
 
-  // Initialize sync sender
+  // Initialize WirelessFieldBridge transmitter
   useEffect(() => {
-    fieldSensorSync.initSender(pin);
+    const bridge = new WirelessFieldBridge(activePin);
+    bridgeRef.current = bridge;
+    setIsConnecting(true);
 
-    const unsubConn = fieldSensorSync.subscribeConnection((connected, transport) => {
-      setActiveTransport(transport);
+    bridge.connectPhoneToPc(activePin, (connected, peerPin) => {
+      setIsWebRtcConnected(connected);
+      setIsConnecting(false);
+      if (connected) {
+        setActiveTransport('webrtc_peer');
+        console.log(`[MobileFieldNode] Linked to PC room ${peerPin} over WebRTC DataChannel`);
+      }
     });
 
+    fieldSensorSync.initSender(activePin);
+
     return () => {
-      unsubConn();
+      bridge.destroy();
     };
-  }, [pin]);
+  }, [activePin]);
+
+  const handleConnectPin = () => {
+    const clean = pinInput.trim();
+    if (clean.length > 0) {
+      setActivePin(clean);
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('pin', clean);
+        window.history.replaceState({}, '', url.toString());
+      }
+    }
+  };
 
   // Request Mobile Hardware Sensor Permissions (iOS 13+ / Android Chrome)
   const requestSensorAccess = async () => {
@@ -162,8 +201,21 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
   // High-Rate Telemetry Broadcast Loop (20Hz / 50ms)
   useEffect(() => {
     const interval = setInterval(() => {
+      // 1. Send via WebRTC DataChannel + BroadcastChannel to PC
+      const packet: FieldNodeTelemetryPacket = {
+        pitch,
+        roll,
+        tiltDeltaDeg: pitchDelta,
+        seismicPgaG: pga,
+        seismicRmsMs2: seismicRms,
+        simulatedMoisturePct: isSimulatedMode ? poreSaturation : null,
+        timestamp: Date.now()
+      };
+      bridgeRef.current?.transmitTelemetry(packet);
+
+      // 2. Also send full FieldNodeTelemetry envelope
       const telemetry: FieldNodeTelemetry = {
-        roomId: pin,
+        roomId: activePin,
         deviceId: 'HIL-PHONE-NODE-1',
         timestamp: Date.now(),
         pitch,
@@ -194,7 +246,7 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
     }, 50);
 
     return () => clearInterval(interval);
-  }, [pin, pitch, roll, pitchDelta, rollDelta, creepVelocity, pga, seismicRms, poreSaturation, stationName, hazardLevel, isSimulatedMode]);
+  }, [activePin, pitch, roll, pitchDelta, rollDelta, creepVelocity, pga, seismicRms, poreSaturation, stationName, hazardLevel, isSimulatedMode]);
 
   // Render high-speed Oscilloscope on Canvas
   useEffect(() => {
@@ -314,7 +366,7 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
                 AEGIS HIL NODE
               </span>
               <span className="px-1.5 py-0.2 rounded bg-cyan-950 border border-cyan-800 text-[10px] font-mono text-cyan-400 font-bold">
-                PIN: {pin}
+                PIN: {activePin}
               </span>
             </div>
             <p className="text-[9px] font-mono text-slate-400">
@@ -325,9 +377,15 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
 
         {/* Real-time Streaming Pulse */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-500 text-emerald-400 text-[10px] font-mono font-bold">
-            <Radio className="w-3 h-3 animate-pulse" />
-            <span>20 Hz</span>
+          <div className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-mono font-bold ${
+            isWebRtcConnected
+              ? 'bg-emerald-950/90 border-emerald-500 text-emerald-400'
+              : isConnecting
+              ? 'bg-amber-950/80 border-amber-500 text-amber-300'
+              : 'bg-slate-900 border-slate-700 text-slate-400'
+          }`}>
+            <Radio className={`w-3 h-3 ${isWebRtcConnected ? 'animate-pulse text-emerald-400' : ''}`} />
+            <span>{isWebRtcConnected ? '20 Hz LIVE' : isConnecting ? 'CONNECTING' : 'OFFLINE'}</span>
           </div>
           <span className="text-[10px] font-mono text-slate-500 hidden sm:inline">
             #{packetCount}
@@ -337,6 +395,64 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
 
       {/* Main Content */}
       <div className="flex-1 p-3 space-y-3 max-w-lg mx-auto w-full">
+        {/* Wireless PC WebRTC Link Card with 4-Digit PIN Input Box */}
+        <div className="glass-panel p-3 rounded-xl border border-cyan-800/60 bg-[#060c1c] space-y-2.5 shadow-lg">
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="text-cyan-300 font-bold flex items-center gap-1.5">
+              <Radio className="w-3.5 h-3.5 text-cyan-400" />
+              CROSS-DEVICE WEBRTC LINK (PC COMMAND CENTER)
+            </span>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+              isWebRtcConnected
+                ? 'bg-emerald-950 text-emerald-300 border border-emerald-500'
+                : isConnecting
+                ? 'bg-amber-950 text-amber-300 border border-amber-500 animate-pulse'
+                : 'bg-slate-800 text-slate-400 border border-slate-700'
+            }`}>
+              {isWebRtcConnected ? 'LINKED (20Hz)' : isConnecting ? 'PAIRING...' : 'DISCONNECTED'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex-1">
+              <label className="text-[10px] font-mono text-slate-400 block mb-0.5">
+                PC ROOM PIN (4 DIGITS)
+              </label>
+              <input
+                type="text"
+                maxLength={6}
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                placeholder="4092"
+                className="w-full bg-slate-900 border border-cyan-500/50 rounded-lg px-3 py-1.5 text-white font-mono text-base tracking-widest text-center focus:outline-none focus:border-cyan-400 uppercase"
+              />
+            </div>
+            <button
+              onClick={handleConnectPin}
+              className={`px-4 py-2 mt-4 rounded-lg font-rajdhani font-bold text-xs tracking-wider transition-all shadow-md ${
+                isWebRtcConnected
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-black'
+                  : 'bg-cyan-500 hover:bg-cyan-400 text-black'
+              }`}
+            >
+              {isWebRtcConnected ? 'RE-CONNECT' : 'CONNECT TO PC'}
+            </button>
+          </div>
+
+          <div className="text-[10px] font-mono text-slate-400">
+            {isWebRtcConnected ? (
+              <span className="text-emerald-400 font-medium flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                Live 20Hz sensor stream flowing to PC Command Center (PIN: {activePin})
+              </span>
+            ) : (
+              <span>
+                Enter the 4-digit PIN displayed on your PC screen, or scan the QR code to auto-connect.
+              </span>
+            )}
+          </div>
+        </div>
+
         {/* Hardware Permission Prompt (if mobile motion sensors need activation) */}
         {!sensorPermissionGranted && (
           <div className="p-3 rounded-lg bg-cyan-950/40 border border-cyan-500/50 flex items-center justify-between gap-2">
@@ -575,7 +691,7 @@ export const MobileFieldNode: React.FC<MobileFieldNodeProps> = ({
         <div className="p-2.5 rounded-lg bg-[#060b17] border border-slate-800/80 text-[10px] font-mono text-slate-400 space-y-1">
           <div className="flex items-center justify-between">
             <span>Transport: <span className="text-cyan-400 font-bold">{activeTransport.toUpperCase()}</span></span>
-            <span>PIN: <span className="text-white font-bold">{pin}</span></span>
+            <span>PIN: <span className="text-white font-bold">{activePin}</span></span>
           </div>
           <p className="text-[9px] text-slate-500">
             Streaming directly to Aegis Laptop Command Center via BroadcastChannel &amp; WebRTC DataChannel.

@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { KERALA_CORRIDORS } from './data/keralaCorridors';
 import { telemetryEngine } from './services/keralaTelemetryEngine';
 import { voiceDispatchEngine } from './services/voiceDispatchEngine';
 import { fieldSensorSync } from './services/fieldSensorSync';
+import { WirelessFieldBridge } from './services/wirelessFieldBridge';
+import type { FieldNodeTelemetryPacket } from './services/wirelessFieldBridge';
 import { keralaMultiHazardEngine } from './utils/keralaMultiHazardEngine';
 import type {
   CorridorTelemetryState,
@@ -40,14 +42,10 @@ export function App() {
     return false;
   });
 
-  const [roomPin] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('room') || '4092';
-    }
-    return '4092';
-  });
-
+  // WebRTC Cross-Device Wireless Bridge
+  const [bridge] = useState<WirelessFieldBridge>(() => new WirelessFieldBridge());
+  const [roomPin, setRoomPin] = useState<string>(() => bridge.roomPin);
+  const [livePhoneData, setLivePhoneData] = useState<FieldNodeTelemetryPacket | null>(null);
   const [telemetryMap, setTelemetryMap] = useState<Record<string, CorridorTelemetryState>>({});
   const [selectedCorridorId, setSelectedCorridorId] = useState<string>('periyar');
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
@@ -57,6 +55,32 @@ export function App() {
   // Live Smartphone HIL Sensor Node state
   const [fieldNodeTelemetry, setFieldNodeTelemetry] = useState<FieldNodeTelemetry | null>(null);
   const [isHILConnected, setIsHILConnected] = useState<boolean>(false);
+
+  // Direct live telemetry ingestion callback from physical smartphone
+  const handleIncomingPhoneTelemetry = useCallback((packet: FieldNodeTelemetryPacket) => {
+    setLivePhoneData(packet);
+    setIsHILConnected(true);
+
+    setFieldNodeTelemetry(prev => ({
+      roomId: bridge.roomPin,
+      deviceId: 'HIL-PHONE-NODE-1',
+      timestamp: packet.timestamp,
+      pitch: packet.pitch,
+      roll: packet.roll,
+      pitchDelta: packet.tiltDeltaDeg,
+      rollDelta: packet.roll,
+      creepVelocity: prev ? prev.creepVelocity : 0.02,
+      pga: packet.seismicPgaG,
+      seismicRms: packet.seismicRmsMs2,
+      accelX: parseFloat((packet.seismicPgaG * 9.8).toFixed(2)),
+      accelY: parseFloat((packet.tiltDeltaDeg * 0.1).toFixed(2)),
+      accelZ: 9.81,
+      poreSaturation: packet.simulatedMoisturePct !== null ? packet.simulatedMoisturePct : (prev?.poreSaturation ?? 76.5),
+      stationName: prev?.stationName || 'WAYANAD-CHOORALMALA-SLOPE-1',
+      hazardLevel: Math.abs(packet.tiltDeltaDeg) > 4.5 || packet.seismicPgaG > 0.08 ? 'CRITICAL_FAILURE' : Math.abs(packet.tiltDeltaDeg) > 1.8 ? 'WARNING' : 'STABLE',
+      isSimulated: packet.simulatedMoisturePct !== null
+    }));
+  }, [bridge.roomPin]);
 
   // Initialize telemetry engine & polling loop
   useEffect(() => {
@@ -88,7 +112,18 @@ export function App() {
       }
     });
 
-    // Subscribe to Smartphone HIL Field Node sync bus
+    // Start WebRTC Wireless Receiver for physical smartphone connection
+    bridge.startPcReceiver(
+      (packet: FieldNodeTelemetryPacket) => {
+        handleIncomingPhoneTelemetry(packet);
+      },
+      (connected: boolean, pin: string) => {
+        setIsHILConnected(connected);
+        setRoomPin(pin);
+      }
+    );
+
+    // Subscribe to Smartphone HIL Field Node BroadcastChannel sync bus (multi-tab backup)
     fieldSensorSync.initReceiver(roomPin);
     const unsubscribeHIL = fieldSensorSync.subscribe((data) => {
       setFieldNodeTelemetry(data);
@@ -100,13 +135,14 @@ export function App() {
     });
 
     return () => {
+      bridge.destroy();
       unsubscribeTelemetry();
       unsubscribeVoice();
       unsubscribeHIL();
       unsubscribeHILConn();
       telemetryEngine.stopPolling();
     };
-  }, [isMobileMode, roomPin]);
+  }, [isMobileMode, roomPin, bridge, handleIncomingPhoneTelemetry]);
 
   // If in dedicated mobile hardware mode, render the full-screen tactical mobile UI
   if (isMobileMode) {
@@ -123,24 +159,85 @@ export function App() {
   }
 
   const selectedCorridor = KERALA_CORRIDORS.find(c => c.id === selectedCorridorId) || KERALA_CORRIDORS[0];
-  const selectedTelemetry = telemetryMap[selectedCorridorId];
+
+  // Effective Slope Angle: effectiveSlope = baseCorridorSlope + Math.abs(packet.tiltDeltaDeg)
+  const effectiveSelectedCorridor = useMemo(() => {
+    if (!livePhoneData) return selectedCorridor;
+    const effectiveSlope = parseFloat((selectedCorridor.upstreamNode.slopeDeg + Math.abs(livePhoneData.tiltDeltaDeg)).toFixed(1));
+    return {
+      ...selectedCorridor,
+      upstreamNode: {
+        ...selectedCorridor.upstreamNode,
+        slopeDeg: effectiveSlope
+      }
+    };
+  }, [selectedCorridor, livePhoneData]);
+
+  // Direct Live Override on PC Dashboard when Phone Packets Arrive
+  const effectiveTelemetryMap = useMemo(() => {
+    if (!livePhoneData) return telemetryMap;
+    const current = telemetryMap[selectedCorridorId];
+    if (!current) return telemetryMap;
+
+    const calculatedSatelliteFoS = current.physics.factorOfSafety;
+    // Tilting the phone by 10°+ or shaking it immediately drives PC FoS below 1.00!
+    const tiltPenalty = Math.abs(livePhoneData.tiltDeltaDeg) * 0.045;
+    const seismicPenalty = livePhoneData.seismicPgaG * 3.5;
+    const liveHardwareFoS = Math.max(0.35, Number((calculatedSatelliteFoS - tiltPenalty - seismicPenalty).toFixed(2)));
+
+    const overrideSaturation = livePhoneData.simulatedMoisturePct !== null
+      ? livePhoneData.simulatedMoisturePct
+      : current.physics.deepSaturationPct;
+
+    const isCritical = liveHardwareFoS < 1.05 || livePhoneData.seismicPgaG > 0.08;
+    const isWarning = liveHardwareFoS < 1.25 || Math.abs(livePhoneData.tiltDeltaDeg) > 2.0;
+    const hazardTier = isCritical ? 'CRITICAL' : isWarning ? 'WARNING' : current.physics.hazardTier;
+    const dynamicRiskIndex = isCritical ? Math.max(88, current.physics.dynamicRiskIndex) : current.physics.dynamicRiskIndex;
+
+    const updatedCorridorState: CorridorTelemetryState = {
+      ...current,
+      upstream: {
+        ...current.upstream,
+        soilSaturationPct: overrideSaturation,
+      },
+      physics: {
+        ...current.physics,
+        factorOfSafety: liveHardwareFoS,
+        deepSaturationPct: overrideSaturation,
+        hazardTier,
+        dynamicRiskIndex,
+        iversonPDE: {
+          ...current.physics.iversonPDE,
+          minFoS: liveHardwareFoS,
+          stabilityStatus: isCritical ? 'CRITICAL_SHEAR_FAILURE' : isWarning ? 'MARGINAL_CREEP' : current.physics.iversonPDE.stabilityStatus
+        }
+      }
+    };
+
+    return {
+      ...telemetryMap,
+      [selectedCorridorId]: updatedCorridorState
+    };
+  }, [telemetryMap, selectedCorridorId, livePhoneData]);
+
+  const selectedTelemetry = effectiveTelemetryMap[selectedCorridorId];
 
   // Evaluate the 6-Vector Multi-Hazard Engine across all 14 Kerala districts
   const sixVectorHazardState: SixVectorHazardState = keralaMultiHazardEngine.evaluateMultiHazard(
     selectedTelemetry,
-    telemetryMap,
+    effectiveTelemetryMap,
     fieldNodeTelemetry,
-    selectedCorridor
+    effectiveSelectedCorridor
   );
 
   // Check if any corridor is currently in CRITICAL state
-  const hasCriticalAlert = Object.values(telemetryMap).some(t => t.physics.hazardTier === 'CRITICAL') ||
+  const hasCriticalAlert = Object.values(effectiveTelemetryMap).some(t => t.physics.hazardTier === 'CRITICAL') ||
     sixVectorHazardState.overallCascadeRiskIndex >= 75;
 
   // Trigger manual emergency dispatch from the UI for the selected corridor
   const handleTriggerEmergencyDispatch = () => {
     if (selectedTelemetry) {
-      const alert = voiceDispatchEngine.triggerManualEmergencyAlert(selectedCorridor, selectedTelemetry);
+      const alert = voiceDispatchEngine.triggerManualEmergencyAlert(effectiveSelectedCorridor, selectedTelemetry);
       setActiveEmergencyAlert(alert);
     }
   };
@@ -148,7 +245,7 @@ export function App() {
   // Re-sync open Voice Dispatch modal whenever selected corridor changes
   useEffect(() => {
     if (activeEmergencyAlert && selectedTelemetry) {
-      const alert = voiceDispatchEngine.triggerManualEmergencyAlert(selectedCorridor, selectedTelemetry);
+      const alert = voiceDispatchEngine.triggerManualEmergencyAlert(effectiveSelectedCorridor, selectedTelemetry);
       setActiveEmergencyAlert(alert);
     }
   }, [selectedCorridorId]);
@@ -169,7 +266,7 @@ export function App() {
 
   const handleLaunchMobileTab = () => {
     if (typeof window !== 'undefined') {
-      window.open(`/?mode=field-node&room=${roomPin}`, '_blank');
+      window.open(`/?mode=field-node&pin=${roomPin}`, '_blank');
     }
   };
 
@@ -177,22 +274,23 @@ export function App() {
     <div className="min-h-screen bg-[#050811] text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-black">
       {/* 1. Tactical Command Topbar */}
       <CommandTopbar
-        telemetryMap={telemetryMap}
+        telemetryMap={effectiveTelemetryMap}
         onOpenSimulator={() => setIsSimulatorOpen(true)}
         onOpenVoiceConsole={handleTriggerEmergencyDispatch}
         onOpenPairingModal={() => setIsPairingModalOpen(true)}
         hasCriticalAlert={hasCriticalAlert}
         isHILConnected={isHILConnected}
+        roomPin={roomPin}
       />
 
       {/* 2. Statewide SDMA/CWC Live Alert Ticker */}
-      <StatewideAlertTicker telemetryMap={telemetryMap} />
+      <StatewideAlertTicker telemetryMap={effectiveTelemetryMap} />
 
       {/* Main Command Operations Center */}
       <main className="flex-1 w-full max-w-[1720px] mx-auto p-3 sm:p-4 md:p-5 space-y-4">
         {/* 3. Five Real Kerala Corridors KPI Cards Grid */}
         <CorridorCardsGrid
-          telemetryMap={telemetryMap}
+          telemetryMap={effectiveTelemetryMap}
           selectedCorridorId={selectedCorridorId}
           onSelectCorridor={(id) => setSelectedCorridorId(id)}
         />
@@ -210,7 +308,7 @@ export function App() {
         {/* 5. Interactive 3D Kerala Terrain Map (MapLibre GL JS) */}
         <section aria-label="3D Geospatial Digital Twin Map">
           <Aegis3DMap
-            telemetryMap={telemetryMap}
+            telemetryMap={effectiveTelemetryMap}
             selectedCorridorId={selectedCorridorId}
             onSelectCorridor={(id) => setSelectedCorridorId(id)}
           />
@@ -220,7 +318,7 @@ export function App() {
         {selectedTelemetry && (
           <section aria-label="Corridor Hydrograph and Civil Engineering Telemetry">
             <CorridorInspectorDrawer
-              corridor={selectedCorridor}
+              corridor={effectiveSelectedCorridor}
               telemetry={selectedTelemetry}
               onTriggerEmergencyDispatch={handleTriggerEmergencyDispatch}
               onOpenSimulatorForCorridor={() => setIsSimulatorOpen(true)}
@@ -248,6 +346,8 @@ export function App() {
         onClose={() => setIsPairingModalOpen(false)}
         pin={roomPin}
         onLaunchMobileTab={handleLaunchMobileTab}
+        telemetry={fieldNodeTelemetry}
+        isConnected={isHILConnected}
       />
 
       {/* Tactical Footer */}

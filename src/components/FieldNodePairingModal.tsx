@@ -23,32 +23,50 @@ interface FieldNodePairingModalProps {
   onClose: () => void;
   pin?: string;
   onLaunchMobileTab: () => void;
+  telemetry?: FieldNodeTelemetry | null;
+  isConnected?: boolean;
 }
 
 export const FieldNodePairingModal: React.FC<FieldNodePairingModalProps> = ({
   isOpen,
   onClose,
   pin = '4092',
-  onLaunchMobileTab
+  onLaunchMobileTab,
+  telemetry: propTelemetry,
+  isConnected: propIsConnected
 }) => {
-  const [telemetry, setTelemetry] = useState<FieldNodeTelemetry | null>(null);
-  const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [transportMode, setTransportMode] = useState<string>('broadcast_channel');
+  const [internalTelemetry, setInternalTelemetry] = useState<FieldNodeTelemetry | null>(null);
+  const [internalIsConnected, setInternalIsConnected] = useState<boolean>(false);
+  const [transportMode, setTransportMode] = useState<string>('webrtc_peer');
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const scopeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pgaHistoryRef = useRef<number[]>(new Array(100).fill(0.015));
   const pitchHistoryRef = useRef<number[]>(new Array(100).fill(0));
 
-  // Determine target mobile node URL
+  const telemetry = propTelemetry !== undefined ? propTelemetry : internalTelemetry;
+  const isConnected = propIsConnected !== undefined ? propIsConnected : internalIsConnected;
+
+  // Determine target mobile node URL with ?mode=field-node&pin=${pin}
   const [targetUrl, setTargetUrl] = useState<string>('');
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const url = `${window.location.origin}/?mode=field-node&room=${pin}`;
+      const url = `${window.location.origin}/?mode=field-node&pin=${pin}`;
       setTargetUrl(url);
     }
   }, [pin]);
+
+  // Update history when telemetry changes
+  useEffect(() => {
+    if (telemetry) {
+      pgaHistoryRef.current.push(telemetry.pga);
+      if (pgaHistoryRef.current.length > 100) pgaHistoryRef.current.shift();
+
+      pitchHistoryRef.current.push(telemetry.pitchDelta);
+      if (pitchHistoryRef.current.length > 100) pitchHistoryRef.current.shift();
+    }
+  }, [telemetry]);
 
   // Generate QR Code on canvas
   useEffect(() => {
@@ -71,25 +89,19 @@ export const FieldNodePairingModal: React.FC<FieldNodePairingModalProps> = ({
     }
   }, [isOpen, targetUrl]);
 
-  // Subscribe to real-time telemetry from phone
+  // Fallback broadcast channel subscription
   useEffect(() => {
     if (!isOpen) return;
 
     fieldSensorSync.initReceiver(pin);
 
     const unsubTelemetry = fieldSensorSync.subscribe((data) => {
-      setTelemetry(data);
-      setIsConnected(true);
-
-      pgaHistoryRef.current.push(data.pga);
-      if (pgaHistoryRef.current.length > 100) pgaHistoryRef.current.shift();
-
-      pitchHistoryRef.current.push(data.pitchDelta);
-      if (pitchHistoryRef.current.length > 100) pitchHistoryRef.current.shift();
+      setInternalTelemetry(data);
+      setInternalIsConnected(true);
     });
 
     const unsubConn = fieldSensorSync.subscribeConnection((conn, transport) => {
-      setIsConnected(conn);
+      setInternalIsConnected(conn);
       setTransportMode(transport);
     });
 
