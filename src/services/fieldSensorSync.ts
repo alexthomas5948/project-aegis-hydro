@@ -118,12 +118,12 @@ class FieldSensorSyncService {
         });
       });
 
-      this.peer.on('error', (err) => {
-        // PeerJS ID may already be taken if multiple tabs are hosts; that's OK because BroadcastChannel works
-        console.info('[FieldSync WebRTC] Standby (BroadcastChannel active):', err.type);
+      this.peer.on('error', (err: any) => {
+        // PeerJS ID may already be taken if multiple tabs or visitors are open; BroadcastChannel takes over
+        console.info('[FieldSync WebRTC Status]:', err?.type || err?.message || 'Standby');
       });
     } catch (err) {
-      console.warn('[FieldSync] PeerJS init error', err);
+      console.info('[FieldSync] PeerJS standby, BroadcastChannel active');
     }
   }
 

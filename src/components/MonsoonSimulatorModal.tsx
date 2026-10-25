@@ -32,6 +32,14 @@ export const MonsoonSimulatorModal: React.FC<MonsoonSimulatorModalProps> = ({
     setConfig(telemetryEngine.getSimulationConfig());
   }, [isOpen]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   if (!isOpen) return null;
 
   const handleSliderChange = (field: keyof SimulationOverrides, value: any) => {
@@ -61,14 +69,6 @@ export const MonsoonSimulatorModal: React.FC<MonsoonSimulatorModalProps> = ({
     });
     setConfig(telemetryEngine.getSimulationConfig());
   };
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   return (
     <div

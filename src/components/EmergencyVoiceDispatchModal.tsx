@@ -33,6 +33,14 @@ export const EmergencyVoiceDispatchModal: React.FC<EmergencyVoiceDispatchModalPr
   const [dispatchReceipt, setDispatchReceipt] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(voiceDispatchEngine.getIsMuted());
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   if (!alert) return null;
 
   const handleToggleMute = () => {
@@ -79,14 +87,6 @@ export const EmergencyVoiceDispatchModal: React.FC<EmergencyVoiceDispatchModalPr
       setIsDispatching(false);
     }
   };
-
-  React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   return (
     <div
