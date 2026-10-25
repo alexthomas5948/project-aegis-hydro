@@ -52,7 +52,7 @@ const TACTICAL_SATELLITE_3D_STYLE = {
     'carto-dark-labels': {
       type: 'raster' as const,
       tiles: [
-        'https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png'
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
       ],
       tileSize: 256
     },
