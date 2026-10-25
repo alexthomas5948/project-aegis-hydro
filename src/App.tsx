@@ -129,20 +129,29 @@ export function App() {
   const sixVectorHazardState: SixVectorHazardState = keralaMultiHazardEngine.evaluateMultiHazard(
     selectedTelemetry,
     telemetryMap,
-    fieldNodeTelemetry
+    fieldNodeTelemetry,
+    selectedCorridor
   );
 
   // Check if any corridor is currently in CRITICAL state
   const hasCriticalAlert = Object.values(telemetryMap).some(t => t.physics.hazardTier === 'CRITICAL') ||
     sixVectorHazardState.overallCascadeRiskIndex >= 75;
 
-  // Trigger manual emergency dispatch from the UI
+  // Trigger manual emergency dispatch from the UI for the selected corridor
   const handleTriggerEmergencyDispatch = () => {
     if (selectedTelemetry) {
       const alert = voiceDispatchEngine.triggerManualEmergencyAlert(selectedCorridor, selectedTelemetry);
       setActiveEmergencyAlert(alert);
     }
   };
+
+  // Re-sync open Voice Dispatch modal whenever selected corridor changes
+  useEffect(() => {
+    if (activeEmergencyAlert && selectedTelemetry) {
+      const alert = voiceDispatchEngine.triggerManualEmergencyAlert(selectedCorridor, selectedTelemetry);
+      setActiveEmergencyAlert(alert);
+    }
+  }, [selectedCorridorId]);
 
   const handleSelectDistrict = (district: string) => {
     if (district === 'Wayanad' || district === 'Kozhikode' || district === 'Malappuram') {

@@ -203,8 +203,13 @@ export const EmergencyVoiceDispatchModal: React.FC<EmergencyVoiceDispatchModalPr
           </div>
           <div className="p-2 rounded bg-slate-900/90 border border-slate-800">
             <div className="text-slate-400 text-[10px] uppercase">SLOPE STABILITY FoS</div>
-            <div className="text-xl font-rajdhani font-bold text-red-400">
-              {(typeof alert.fos === 'number' ? alert.fos : Number(alert.fos)).toFixed(2)} (CRITICAL)
+            <div className={`text-xl font-rajdhani font-bold ${
+              alert.fos < 1.05 ? 'text-red-400' : alert.fos < 1.25 ? 'text-amber-400' : 'text-emerald-400'
+            }`}>
+              {(typeof alert.fos === 'number' ? alert.fos : Number(alert.fos)).toFixed(2)}{' '}
+              <span className="text-xs font-normal">
+                ({alert.fos < 1.05 ? 'CRITICAL SLIP' : alert.fos < 1.25 ? 'WATCH (MARGINAL)' : 'STABLE'})
+              </span>
             </div>
           </div>
           <div className="p-2 rounded bg-slate-900/90 border border-slate-800">

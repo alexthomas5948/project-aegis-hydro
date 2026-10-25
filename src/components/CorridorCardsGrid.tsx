@@ -92,8 +92,17 @@ export const CorridorCardsGrid: React.FC<CorridorCardsGridProps> = ({
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Slope FoS:</span>
-                    <span className={`font-bold ${physics.factorOfSafety < 1.15 ? 'text-red-400' : 'text-emerald-400'}`}>
-                      {physics.factorOfSafety.toFixed(2)}
+                    <span className={`font-bold ${
+                      physics.factorOfSafety < 1.05
+                        ? 'text-red-400'
+                        : physics.factorOfSafety < 1.25
+                        ? 'text-amber-400'
+                        : 'text-emerald-400'
+                    }`}>
+                      {physics.factorOfSafety.toFixed(2)}{' '}
+                      <span className="text-[9px] font-normal">
+                        ({physics.factorOfSafety < 1.05 ? 'CRITICAL SLIP' : physics.factorOfSafety < 1.25 ? 'WATCH' : 'STABLE'})
+                      </span>
                     </span>
                   </div>
                   <div className="flex items-center justify-between">

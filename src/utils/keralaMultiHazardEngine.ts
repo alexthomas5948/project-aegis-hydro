@@ -12,8 +12,10 @@ import type {
   KeralaDistrict,
   HazardTier,
   FieldNodeTelemetry,
-  CorridorTelemetryState
+  CorridorTelemetryState,
+  HydrologicalCorridor
 } from '../types/hydrology';
+import { KERALA_CORRIDORS } from '../data/keralaCorridors';
 
 /**
  * 5 Strategic Kerala Reservoirs Baseline Data
@@ -119,8 +121,13 @@ class KeralaMultiHazardEngine {
   public evaluateMultiHazard(
     activeCorridorState: CorridorTelemetryState | undefined,
     allCorridorStates: Record<string, CorridorTelemetryState>,
-    fieldNodeTelemetry: FieldNodeTelemetry | null
+    fieldNodeTelemetry: FieldNodeTelemetry | null,
+    selectedCorridorParam?: HydrologicalCorridor
   ): SixVectorHazardState {
+    const corridor = selectedCorridorParam ||
+      KERALA_CORRIDORS.find(c => c.id === activeCorridorState?.corridorId) ||
+      KERALA_CORRIDORS[0];
+
     const upstream = activeCorridorState?.upstream;
     const downstream = activeCorridorState?.downstream;
     const physics = activeCorridorState?.physics;
@@ -186,26 +193,24 @@ class KeralaMultiHazardEngine {
     const fieldDeltaPitch = fieldNodeTelemetry ? Math.abs(fieldNodeTelemetry.pitchDelta) : 0.0;
 
     // Pseudostatic seismic inertial degradation + creep cohesion loss:
-    // Delta Tau_inertial = gamma * z * PGA * cos(beta)
-    // FoS_dyn = (c'_eff + (sigma - u) tan phi) / (tau_grav + tau_inertial)
-    const seismicInertialPenalty = livePga * 2.8;
-    const creepPenalty = (slopeCreep * 0.12) + (fieldDeltaPitch * 0.04);
-    const dynamicFoS = Math.max(0.65, parseFloat((baseFoS - seismicInertialPenalty - creepPenalty).toFixed(2)));
+    const seismicInertialPenalty = fieldNodeTelemetry ? livePga * 2.8 : 0;
+    const creepPenalty = fieldNodeTelemetry ? (slopeCreep * 0.12) + (fieldDeltaPitch * 0.04) : 0;
+    const dynamicFoS = Math.max(0.40, parseFloat((baseFoS - seismicInertialPenalty - creepPenalty).toFixed(2)));
 
     const acousticRumbling = (livePga > 0.035 || tremorRms > 0.35 || slopeCreep > 0.15) && soilSaturation > 75;
 
     let v2Status: Vector2UrulpottalState['status'] = 'STABLE';
-    let v2Summary = 'Subsurface geotechnical shear stress within safe threshold. Inclinometer stable.';
+    let v2Summary = `${corridor.upstreamNode.name} geotechnical shear stress within safe threshold (FoS: ${dynamicFoS.toFixed(2)}).`;
 
-    if (dynamicFoS < 0.98) {
+    if (dynamicFoS < 1.05) {
       v2Status = 'FAILURE_OCCURRED';
-      v2Summary = `CRITICAL URULPOTTAL (DEBRIS FLOW) INITIATED: FoS = ${dynamicFoS.toFixed(2)} < 1.0! Catastrophic shear failure at z = 1.75m. Rapid mass wasting descending into gorge!`;
-    } else if (dynamicFoS < 1.08 || acousticRumbling) {
+      v2Summary = `CRITICAL URULPOTTAL (DEBRIS FLOW) INITIATED: ${corridor.upstreamNode.name} FoS = ${dynamicFoS.toFixed(2)} < 1.05! Catastrophic shear failure at z = 1.75m. Rapid mass wasting descending into gorge!`;
+    } else if (dynamicFoS < 1.25 || acousticRumbling) {
       v2Status = 'IMMINENT_DETACHMENT';
-      v2Summary = `IMMINENT DETACHMENT ALERT: Subsurface acoustic rumbling & high-frequency seismic tremor detected (PGA: ${livePga.toFixed(3)}g, Creep: ${slopeCreep.toFixed(2)}°/hr). FoS collapsed to ${dynamicFoS.toFixed(2)}!`;
-    } else if (dynamicFoS < 1.25 || slopeCreep > 0.08) {
-      v2Status = 'PRE_RUPTURE_WARNING';
-      v2Summary = `Pre-rupture shear strain detected. Transient pore-pressure surge reducing effective stress. FoS: ${dynamicFoS.toFixed(2)}.`;
+      v2Summary = `WATCH (MARGINAL) DETACHMENT ALERT for ${corridor.upstreamNode.name}: Subsurface shear strain detected. FoS: ${dynamicFoS.toFixed(2)}.`;
+    } else {
+      v2Status = 'STABLE';
+      v2Summary = `${corridor.upstreamNode.name} slope stability nominal with Infinite Slope FoS = ${dynamicFoS.toFixed(2)}.`;
     }
 
     const vector2Urulpottal: Vector2UrulpottalState = {
@@ -223,42 +228,51 @@ class KeralaMultiHazardEngine {
     // -----------------------------------------------------------------------
     // VECTOR 3: LANDSLIDE DAM OUTBURST FLOOD (LDOF) PREDICTOR
     // -----------------------------------------------------------------------
-    // Choke gorge geometry (Mundakkai / Chooralmala / Sabarimala gorge: channel width ~ 34m)
-    const channelWidthM = 34.0;
+    const gorgeName = corridor.id === 'chaliyar'
+      ? 'Mundakkai-Chooralmala Gorge'
+      : corridor.id === 'meenachil'
+      ? 'Vagamon-Erattupetta Mountain Chasm'
+      : corridor.id === 'periyar'
+      ? 'Idukki-Cheruthoni Gorge Bottleneck'
+      : corridor.id === 'chalakudy'
+      ? 'Athirappilly-Vettilappara Gorge'
+      : 'Sabarimala Forest Gorge Bottleneck';
+
+    const channelWidthM = corridor.id === 'meenachil' ? 28.0 : corridor.id === 'chaliyar' ? 34.0 : 42.0;
     let blockageProb = 5.0;
-    if (dynamicFoS < 1.0) {
+    if (dynamicFoS < 1.05) {
       blockageProb = 95.0;
-    } else if (dynamicFoS < 1.15) {
-      blockageProb = Math.min(90, Math.round((1.20 - dynamicFoS) * 350));
-    } else if (dynamicFoS < 1.30) {
+    } else if (dynamicFoS < 1.25) {
+      blockageProb = Math.min(90, Math.round((1.25 - dynamicFoS) * 350));
+    } else if (dynamicFoS < 1.35) {
       blockageProb = 25.0;
     }
 
     // Debris dam height Hd & Impoundment volume Vw (m3)
     const debrisDamHeight = dynamicFoS < 1.05 ? 18.5 : 8.0;
-    const impoundmentVolume = dynamicFoS < 1.05 ? Math.round(350000 + (rainfallMmHr * 3500)) : 45000;
+    const impoundmentVolume = dynamicFoS < 1.05 ? Math.round(250000 + (rainfallMmHr * 2500)) : 35000;
 
     // Froehlich (1995/2008) Embankment Breach Peak Equation:
     // Q_peak = 0.607 * (V_w ^ 0.295) * (H_d ^ 1.24)
     const froehlichPeak = parseFloat((0.607 * Math.pow(impoundmentVolume, 0.295) * Math.pow(debrisDamHeight, 1.24)).toFixed(1));
-    const downstreamEta = dynamicFoS < 1.05 ? 24 : 65; // minutes to first downstream settlement
+    const downstreamEta = dynamicFoS < 1.05 ? Math.round(physics?.floodCrestEtaMinutes ? physics.floodCrestEtaMinutes * 0.4 : 24) : 65;
 
     let v3Status: Vector3LDOFState['status'] = 'NORMAL';
-    let v3Summary = 'Narrow mountain gorge free flowing; no debris damming detected.';
+    let v3Summary = `${gorgeName} channel free flowing; no debris damming detected.`;
 
-    if (dynamicFoS < 1.0 && blockageProb >= 85) {
+    if (dynamicFoS < 1.05 && blockageProb >= 80) {
       v3Status = 'CATASTROPHIC_BREACH_ALERT';
-      v3Summary = `LDOF BREACH ALERT: 18.5m debris dam impounding ${impoundmentVolume.toLocaleString()} m³ has initiated overtopping breach! Froehlich peak outburst: ${froehlichPeak} m³/s hitting downstream wards in T+${downstreamEta}m!`;
-    } else if (dynamicFoS < 1.10) {
+      v3Summary = `LDOF BREACH ALERT for ${corridor.name}: 18.5m debris dam in ${gorgeName} impounding ${impoundmentVolume.toLocaleString()} m³ has initiated overtopping breach! Froehlich peak outburst: ${froehlichPeak} m³/s hitting ${corridor.downstreamNode.name} in T+${downstreamEta}m!`;
+    } else if (dynamicFoS < 1.25) {
       v3Status = 'IMPOUNDMENT_FORMING';
-      v3Summary = `Gorge choking underway: Debris blockage detected at narrow gorge (W=${channelWidthM}m). Impoundment volume climbing rapidly.`;
+      v3Summary = `Gorge choking underway at ${gorgeName} (W=${channelWidthM}m). Impoundment volume climbing rapidly.`;
     } else if (blockageProb > 20) {
       v3Status = 'POTENTIAL_DAMMING';
-      v3Summary = `Potential debris damming in narrow gorge if upstream detachment propagates. Blockage probability: ${blockageProb}%.`;
+      v3Summary = `Potential debris damming in ${gorgeName} if upstream detachment propagates. Blockage probability: ${blockageProb}%.`;
     }
 
     const vector3LDOF: Vector3LDOFState = {
-      gorgeName: activeCorridorState?.corridorId === 'chaliyar' ? 'Mundakkai-Chooralmala Gorge' : 'Upper Periyar Gorge Bottleneck',
+      gorgeName,
       channelWidthM,
       blockageProbabilityPct: blockageProb,
       impoundmentVolumeM3: impoundmentVolume,
@@ -339,33 +353,69 @@ class KeralaMultiHazardEngine {
     // -----------------------------------------------------------------------
     // VECTOR 5: 20-REACH FLUVIAL SURGE ROUTING
     // -----------------------------------------------------------------------
-    const totalHeadwaterSurge = riverDischarge + (v3Status === 'CATASTROPHIC_BREACH_ALERT' ? froehlichPeak * 0.75 : 0);
-    const waveCelerity = parseFloat((2.8 + (totalHeadwaterSurge / 2500) * 1.8).toFixed(2)); // m/s
-    const crestTravelTimeHours = parseFloat((50 / (waveCelerity * 3.6)).toFixed(1)); // 50km reach corridor
+    const peakDischarge = physics?.muskingumCunge?.peakDischargeM3s ?? riverDischarge;
+    const totalHeadwaterSurge = peakDischarge;
+    const dangerDischarge = corridor.downstreamNode.dangerDischarge;
+    const waveCelerity = parseFloat((
+      physics?.muskingumCunge?.reaches?.[0]?.waveCelerityMs
+        ? physics.muskingumCunge.reaches.reduce((acc, r) => acc + r.waveCelerityMs, 0) / physics.muskingumCunge.reaches.length
+        : Math.min(7.5, Math.max(1.2, 1.15 * Math.pow(Math.max(0.2, riverDischarge / dangerDischarge), 0.38) * (1.0 + (soilSaturation / 100.0) * 0.45) * (5.0 / 3.0)))
+    ).toFixed(2));
+    const crestTravelTimeHours = Number(((physics?.floodCrestEtaMinutes ?? 180) / 60).toFixed(1));
 
     let v5Status: Vector5FluvialSurgeState['status'] = 'FLOW_STEADY';
-    let v5Summary = `River corridor flowing within natural banks. Wave celerity: ${waveCelerity} m/s.`;
+    let v5Summary = `${corridor.name} flowing within natural banks. Wave celerity: ${waveCelerity} m/s.`;
 
-    if (totalHeadwaterSurge >= 3200) {
+    if (peakDischarge >= dangerDischarge * 1.15) {
       v5Status = 'EXTREME_FLIGHT_WARNING';
-      v5Summary = `EXTREME FLUVIAL SURGE ROARING DOWNSTREAM: Crest discharge ${totalHeadwaterSurge.toFixed(0)} m³/s traveling at ${waveCelerity} m/s! Catastrophic overbank flooding across lowland towns in T+${crestTravelTimeHours}h!`;
-    } else if (totalHeadwaterSurge >= 2200) {
+      v5Summary = `EXTREME FLUVIAL SURGE in ${corridor.name}: Crest discharge ${peakDischarge.toLocaleString()} m³/s traveling at ${waveCelerity} m/s! Catastrophic overbank flooding across ${corridor.downstreamNode.name} in T+${crestTravelTimeHours}h!`;
+    } else if (peakDischarge >= dangerDischarge * 0.85) {
       v5Status = 'OVERBANK_DISCHARGE';
-      v5Summary = `Overbank flood stage reached along lower reaches. Flood wave attenuating through floodplains.`;
-    } else if (totalHeadwaterSurge >= 1400) {
+      v5Summary = `Overbank flood stage reached along lower reaches of ${corridor.name}. Crest ETA: T+${crestTravelTimeHours}h.`;
+    } else if (peakDischarge >= dangerDischarge * 0.6) {
       v5Status = 'CREST_PROPAGATING';
-      v5Summary = `Muskingum-Cunge diffusion wave crest actively propagating through reaches 1–20.`;
+      v5Summary = `Muskingum-Cunge diffusion wave crest actively propagating through reaches 1–20 of ${corridor.name}.`;
     }
 
-    const keyGaugeStages = [
-      { town: 'Aluva Manappuram', stageM: parseFloat((4.8 + (totalHeadwaterSurge / 1200) * 1.5).toFixed(2)), dangerM: 7.2, etaHours: crestTravelTimeHours },
-      { town: 'Kalady Bridge', stageM: parseFloat((5.1 + (totalHeadwaterSurge / 1300) * 1.4).toFixed(2)), dangerM: 6.8, etaHours: parseFloat((crestTravelTimeHours * 0.65).toFixed(1)) },
-      { town: 'Chengannur Enathu', stageM: parseFloat((4.2 + (totalHeadwaterSurge / 1400) * 1.6).toFixed(2)), dangerM: 6.5, etaHours: crestTravelTimeHours }
-    ];
+    const gaugeStationsByCorridor: Record<string, { town: string; offsetFraction: number }[]> = {
+      meenachil: [
+        { town: 'Pala Town Riverbank', offsetFraction: 1.0 },
+        { town: 'Erattupetta Confluence', offsetFraction: 0.5 },
+        { town: 'Ettumanoor / Kumarakom', offsetFraction: 1.2 }
+      ],
+      periyar: [
+        { town: 'Aluva Manappuram', offsetFraction: 1.0 },
+        { town: 'Kalady Bridge', offsetFraction: 0.65 },
+        { town: 'Kochi Airport Floodplain', offsetFraction: 1.1 }
+      ],
+      chaliyar: [
+        { town: 'Nilambur Chaliyar Bridge', offsetFraction: 0.7 },
+        { town: 'Feroke Estuary', offsetFraction: 1.0 },
+        { town: 'Mundakkai Valley Crossing', offsetFraction: 0.3 }
+      ],
+      pamba: [
+        { town: 'Chengannur Enathu Bridge', offsetFraction: 1.0 },
+        { town: 'Ranni Town Riverfront', offsetFraction: 0.6 },
+        { town: 'Upper Kuttanad Polders', offsetFraction: 1.3 }
+      ],
+      chalakudy: [
+        { town: 'Chalakudy Town Market', offsetFraction: 1.0 },
+        { town: 'Athirappilly Waterfall Gorge', offsetFraction: 0.4 },
+        { town: 'Puthenvelikkara Confluence', offsetFraction: 1.2 }
+      ]
+    };
+
+    const corridorGauges = gaugeStationsByCorridor[corridor.id] || gaugeStationsByCorridor.periyar;
+    const keyGaugeStages = corridorGauges.map(g => ({
+      town: g.town,
+      stageM: parseFloat((corridor.downstreamNode.baseStageM + (corridor.downstreamNode.dangerStageM - corridor.downstreamNode.baseStageM) * (peakDischarge / dangerDischarge) * g.offsetFraction).toFixed(2)),
+      dangerM: corridor.downstreamNode.dangerStageM,
+      etaHours: parseFloat((crestTravelTimeHours * g.offsetFraction).toFixed(1))
+    }));
 
     const vector5FluvialSurge: Vector5FluvialSurgeState = {
       reachesCount: 20,
-      peakSurgeDischargeM3s: Math.round(totalHeadwaterSurge),
+      peakSurgeDischargeM3s: Math.round(peakDischarge),
       waveCelerityMs: waveCelerity,
       crestTravelTimeHours,
       keyGaugeStages,

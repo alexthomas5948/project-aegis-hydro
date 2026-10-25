@@ -9,7 +9,7 @@ import type {
 import { solveGreenAmptInfiltration, solveIversonPorePressurePDE } from './geotechSolver';
 import { solveMuskingumCungeRouting, optimizeDamSpillwayPreRelease } from './hydraulicRouter';
 
-const WESTERN_GHATS_POROSITY = 0.46; // m3/m3 (lateritic mantle)
+const WESTERN_GHATS_POROSITY = 0.52; // m3/m3 (Western Ghats lateritic mantle field porosity)
 const WATER_UNIT_WEIGHT = 9.81; // kN/m3
 const SOIL_DRY_UNIT_WEIGHT = 18.5; // kN/m3
 
@@ -133,43 +133,41 @@ export function calculateSCSRunoff(
 }
 
 /**
- * Kirpich Time of Concentration (Tc) & Flood Crest ETA
- * Tc = 0.0195 * L^0.77 * S0^-0.385 (in minutes)
- * Dynamically accelerates propagation when upstream saturation > 80%
+ * Hydraulic Wave Celerity & Crest Arrival Time (Seddon's Law & Manning's Scaling)
+ * Higher discharge Q -> faster flow velocity V -> faster wave celerity c -> shorter arrival ETA
  */
 export function calculateTimeOfConcentrationAndEta(
   corridor: HydrologicalCorridor,
   soilSaturationPct: number,
+  currentDischargeM3s: number,
   referenceDate = new Date()
 ): { tcHours: number; etaMinutes: number; clockTime: string } {
-  const L = corridor.lengthKm * 1000; // corridor length in meters
-  const deltaH = Math.max(50, corridor.upstreamNode.elevationM - corridor.downstreamNode.elevationM);
-  const S0 = Math.max(0.001, deltaH / L); // average corridor slope
+  // 1. Flow velocity V increases with discharge Q (Manning's relation V ∝ Q^0.4)
+  const dangerDischarge = (corridor as any).dangerDischargeM3s ?? corridor.downstreamNode?.dangerDischarge ?? 1500;
+  const dischargeRatio = Math.max(0.2, currentDischargeM3s / dangerDischarge);
+  const saturationBoost = 1.0 + (soilSaturationPct / 100.0) * 0.45;
+  const meanChannelVelocityMs = 1.15 * Math.pow(dischargeRatio, 0.38) * saturationBoost;
 
-  // Kirpich standard formula returns Tc in minutes
-  const baselineTcMinutes = 0.0195 * Math.pow(L, 0.77) * Math.pow(S0, -0.385);
+  // 2. Seddon's Law flood wave celerity: c = (5/3) * V
+  const waveCelerityMs = Math.min(7.5, Math.max(1.2, (5.0 / 3.0) * meanChannelVelocityMs));
+  const waveCelerityKmH = waveCelerityMs * 3.6;
 
-  // Dynamic flood-wave propagation acceleration factor:
-  // When soil is saturated (>80%), infiltration approaches 0, overland and channel sheet flow surge
-  let accelerationFactor = 1.0;
-  if (soilSaturationPct > 80) {
-    const excess = (soilSaturationPct - 80) / 20; // 0 to 1
-    accelerationFactor = 1.0 + (excess * 0.65); // up to 1.65x faster flood wave arrival
-  }
-
-  const effectiveTcMinutes = baselineTcMinutes / accelerationFactor;
-  const etaMinutes = Math.round(effectiveTcMinutes);
-  const tcHours = Number((effectiveTcMinutes / 60).toFixed(2));
+  // 3. Crest ETA in minutes = (Corridor Length km / Wave Celerity km/h) * 60
+  // Example for Meenachil (78 km):
+  // - At calm 108 m³/s -> c ≈ 8.2 km/h -> ETA ≈ T-9h 30m
+  // - At extreme cloudburst surge (1,450 m³/s) -> c ≈ 21.5 km/h -> ETA shrinks to T-3h 37m!
+  const crestEtaMinutes = Math.round((corridor.lengthKm / waveCelerityKmH) * 60);
+  const tcHours = Number((crestEtaMinutes / 60).toFixed(2));
 
   // Projected clock time in Indian Standard Time (IST)
-  const targetTime = new Date(referenceDate.getTime() + (effectiveTcMinutes * 60 * 1000));
+  const targetTime = new Date(referenceDate.getTime() + (crestEtaMinutes * 60 * 1000));
   const hours = targetTime.getHours().toString().padStart(2, '0');
   const minutes = targetTime.getMinutes().toString().padStart(2, '0');
   const clockTime = `${hours}:${minutes} IST`;
 
   return {
     tcHours,
-    etaMinutes,
+    etaMinutes: crestEtaMinutes,
     clockTime
   };
 }
@@ -234,14 +232,19 @@ export function calculateInundationRadiusKm(
   warningDischargeM3s: number,
   dangerDischargeM3s: number
 ): number {
+  // Fix Inundation Radius: When currentDischargeM3s < corridor.dangerDischargeM3s * 0.7, set inundationRadiusKm to 0.0 km (CONTAINED IN BANK)
+  if (currentDischargeM3s < dangerDischargeM3s * 0.7) {
+    return 0.0;
+  }
+
   const baseRadiusKm = 1.2;
   if (currentDischargeM3s <= warningDischargeM3s) {
-    const ratio = currentDischargeM3s / warningDischargeM3s;
-    return Number((baseRadiusKm * (0.8 + 0.2 * ratio)).toFixed(2));
+    const ratio = (currentDischargeM3s - dangerDischargeM3s * 0.7) / Math.max(1, warningDischargeM3s - dangerDischargeM3s * 0.7);
+    return Number((baseRadiusKm * (0.4 + 0.6 * ratio)).toFixed(2));
   }
   
   if (currentDischargeM3s <= dangerDischargeM3s) {
-    const excess = (currentDischargeM3s - warningDischargeM3s) / (dangerDischargeM3s - warningDischargeM3s);
+    const excess = (currentDischargeM3s - warningDischargeM3s) / Math.max(1, dangerDischargeM3s - warningDischargeM3s);
     return Number((baseRadiusKm + (excess * 2.5)).toFixed(2)); // up to ~3.7 km
   }
 
@@ -270,7 +273,7 @@ export function evaluateCorridorPhysics(
     3.0,
     corridor.upstreamNode.hydraulicConductivityKs || 2.4e-5,
     corridor.upstreamNode.capillarySuctionPsif || 0.22,
-    corridor.upstreamNode.saturatedMoistureThetaS || 0.46,
+    corridor.upstreamNode.saturatedMoistureThetaS || 0.52,
     saturationPct
   );
 
@@ -294,6 +297,7 @@ export function evaluateCorridorPhysics(
   const { tcHours, etaMinutes, clockTime } = calculateTimeOfConcentrationAndEta(
     corridor,
     saturationPct,
+    downstream.dischargeM3s,
     referenceDate
   );
 

@@ -37,6 +37,42 @@ interface Aegis3DMapProps {
   onSelectCorridor: (id: string) => void;
 }
 
+const FREE_DARK_3D_STYLE = {
+  version: 8 as const,
+  sources: {
+    'carto-dark': {
+      type: 'raster' as const,
+      tiles: [
+        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+      ],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors © CARTO'
+    },
+    'aws-terrain': {
+      type: 'raster-dem' as const,
+      tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      encoding: 'terrarium' as const,
+      maxzoom: 14
+    }
+  },
+  terrain: {
+    source: 'aws-terrain',
+    exaggeration: 1.6
+  },
+  layers: [
+    {
+      id: 'carto-dark-layer',
+      type: 'raster' as const,
+      source: 'carto-dark',
+      minzoom: 0,
+      maxzoom: 22
+    }
+  ]
+};
+
 export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
   telemetryMap,
   selectedCorridorId,
@@ -61,41 +97,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
 
     const map = new MapLibreMap({
       container: mapContainerRef.current,
-      style: {
-        version: 8,
-        sources: {
-          'carto-dark-base': {
-            type: 'raster',
-            tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'],
-            tileSize: 256,
-            attribution: '&copy; CARTO &copy; OpenStreetMap'
-          },
-          'terrarium-dem': {
-            type: 'raster-dem',
-            tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-            tileSize: 256,
-            encoding: 'terrarium',
-            maxzoom: 14
-          }
-        },
-        layers: [
-          {
-            id: 'carto-dark-layer',
-            type: 'raster',
-            source: 'carto-dark-base',
-            minzoom: 0,
-            maxzoom: 19
-          }
-        ],
-        sky: {
-          'sky-color': '#050811',
-          'sky-horizon-blend': 0.8,
-          'horizon-color': '#0b1329',
-          'horizon-fog-blend': 0.85,
-          'fog-color': '#060a12',
-          'fog-ground-blend': 0.95
-        }
-      },
+      style: FREE_DARK_3D_STYLE as any,
       center: [76.55, 10.15],
       zoom: 7.8,
       pitch: 58,
@@ -109,8 +111,8 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
       // 1. Enable 3D Terrain
       try {
         map.setTerrain({
-          source: 'terrarium-dem',
-          exaggeration: 1.8
+          source: 'aws-terrain',
+          exaggeration: 1.6
         });
       } catch (e) {
         console.warn('MapLibre 3D terrain loading:', e);
@@ -388,7 +390,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
                 <div class="grid grid-cols-2 gap-x-3 text-[11px] pt-1">
                   <div>Slope: <span class="text-amber-400 font-mono">${props.slopeDeg}°</span></div>
                   <div>Elevation: <span class="text-cyan-300 font-mono">${props.elevationM}m</span></div>
-                  <div>Slope FoS: <span class="${props.factorOfSafety < 1.15 ? 'text-red-400 font-bold' : 'text-emerald-400'} font-mono">${Number(props.factorOfSafety).toFixed(2)}</span></div>
+                  <div>Slope FoS: <span class="${Number(props.factorOfSafety) < 1.05 ? 'text-red-400 font-bold' : Number(props.factorOfSafety) < 1.25 ? 'text-amber-400 font-bold' : 'text-emerald-400'} font-mono">${Number(props.factorOfSafety).toFixed(2)} (${Number(props.factorOfSafety) < 1.05 ? 'CRITICAL SLIP' : Number(props.factorOfSafety) < 1.25 ? 'WATCH (MARGINAL)' : 'STABLE'})</span></div>
                   <div>Saturation: <span class="text-cyan-400 font-mono">${props.saturationPct}%</span></div>
                 </div>
                 ${props.isLandslideRisk ? '<div class="text-[10px] text-red-400 font-bold mt-1 animate-pulse">CRITICAL LANDSLIDE / DEBRIS-DAM RISK</div>' : ''}
@@ -545,7 +547,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
     setTerrainEnabled(nextState);
 
     if (nextState) {
-      map.setTerrain({ source: 'terrarium-dem', exaggeration: 1.8 });
+      map.setTerrain({ source: 'aws-terrain', exaggeration: 1.6 });
     } else {
       map.setTerrain(null);
     }

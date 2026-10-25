@@ -456,7 +456,7 @@ class KeralaTelemetryEngine {
 
       // Simulated upstream values
       const simSatPct = Math.min(100, Math.max(30, antecedentSoilMoisturePct));
-      const simVolumetricMoisture = Number(((simSatPct / 100) * 0.46).toFixed(4));
+      const simVolumetricMoisture = Number(((simSatPct / 100) * 0.52).toFixed(4));
       
       const upstream: TelemetryUpstream = {
         ...baseState.upstream,
@@ -477,11 +477,22 @@ class KeralaTelemetryEngine {
         damDischargeReleaseM3s: damReleaseM3s
       };
 
-      // Direct runoff addition + dam release into river discharge
-      // 1 mm direct runoff over catchment area converts to m3/s volume
-      const catchmentMultiplier = corridor.catchmentAreaSqKm * 0.12;
-      const additionalRunoffDischarge = Math.round((cloudburstRateMmHr * (simSatPct / 100)) * catchmentMultiplier);
-      const totalSimulatedDischarge = Math.round(corridor.downstreamNode.baseDischarge + additionalRunoffDischarge + damReleaseM3s);
+      // Scale simulated peak surge proportionally to each basin's danger discharge and catchment capacity
+      // e.g., corridor.dangerDischargeM3s * (1.25 + cloudburstIntensity / 120), giving ~1,420 m³/s for Meenachil and ~3,850 m³/s for Periyar
+      const dangerDischarge = corridor.downstreamNode.dangerDischarge;
+      const cloudburstSurgeMultiplier = cloudburstRateMmHr > 0
+        ? (1.25 + (cloudburstRateMmHr / 120))
+        : 1.0;
+      
+      const damSurgeRatio = (corridor.midstreamNode?.damCapacityMcm && damReleaseM3s > 0)
+        ? Math.min(0.35, damReleaseM3s / (corridor.midstreamNode.damCapacityMcm * 1.5))
+        : 0;
+
+      const totalSimulatedDischarge = Math.round(
+        cloudburstRateMmHr > 0
+          ? dangerDischarge * (cloudburstSurgeMultiplier + damSurgeRatio)
+          : Math.max(corridor.downstreamNode.baseDischarge, corridor.downstreamNode.baseDischarge + Math.min(dangerDischarge * 0.5, damReleaseM3s))
+      );
 
       const stageRatio = totalSimulatedDischarge / corridor.downstreamNode.dangerDischarge;
       const stageHeightM = Number((

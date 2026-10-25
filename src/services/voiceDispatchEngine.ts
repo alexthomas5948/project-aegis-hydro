@@ -1,4 +1,5 @@
 import type { DispatchVoiceAlert, HydrologicalCorridor, CorridorTelemetryState } from '../types/hydrology';
+import { generateBilingualAlertAndCAPXml } from '../utils/capXmlGenerator';
 
 type AlertListener = (alerts: DispatchVoiceAlert[]) => void;
 
@@ -182,6 +183,15 @@ class VoiceDispatchEngine {
       }
     };
 
+    const bilingual = generateBilingualAlertAndCAPXml(corridor, {
+      ...state,
+      physics: {
+        ...state.physics,
+        dynamicRiskIndex: dri,
+        factorOfSafety: Number(fosFormatted)
+      }
+    });
+
     return {
       id,
       corridorId: corridor.id,
@@ -193,9 +203,9 @@ class VoiceDispatchEngine {
       etaString: etaStr,
       targetTown: corridor.downstreamNode.name,
       affectedWards: corridor.downstreamNode.vulnerableWards,
-      broadcastMessage: state.bilingualAlert?.englishScript || broadcastMessage,
-      malayalamBroadcastMessage: state.bilingualAlert?.malayalamScript || '',
-      capXml: state.bilingualAlert?.capXmlPacket || '',
+      broadcastMessage: bilingual.englishScript || broadcastMessage,
+      malayalamBroadcastMessage: bilingual.malayalamScript || '',
+      capXml: bilingual.capXmlPacket || '',
       webhookPayload,
       status: 'PENDING'
     };

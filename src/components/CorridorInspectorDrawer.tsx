@@ -146,14 +146,14 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
         <div className="glass-panel-subtle p-2.5 rounded border border-slate-800">
           <div className="text-[10px] text-slate-400 font-mono uppercase flex items-center justify-between">
             <span>Infinite Slope FoS</span>
-            <TrendingDown className={`w-3 h-3 ${physics.factorOfSafety < 1.15 ? 'text-red-400' : 'text-emerald-400'}`} />
+            <TrendingDown className={`w-3 h-3 ${physics.factorOfSafety < 1.05 ? 'text-red-400' : physics.factorOfSafety < 1.25 ? 'text-amber-400' : 'text-emerald-400'}`} />
           </div>
           <div className={`text-xl font-rajdhani font-bold mt-1 ${
-            physics.factorOfSafety < 1.15 ? 'text-red-400 font-extrabold' : 'text-emerald-400'
+            physics.factorOfSafety < 1.05 ? 'text-red-400 font-extrabold' : physics.factorOfSafety < 1.25 ? 'text-amber-400 font-bold' : 'text-emerald-400'
           }`}>
             {physics.factorOfSafety.toFixed(2)}
             <span className="text-[10px] font-mono font-normal ml-1 text-slate-400">
-              {physics.factorOfSafety < 1.15 ? 'CRITICAL SLIP' : 'STABLE'}
+              {physics.factorOfSafety < 1.05 ? 'CRITICAL SLIP' : physics.factorOfSafety < 1.25 ? 'WATCH (MARGINAL)' : 'STABLE'}
             </span>
           </div>
         </div>
@@ -411,8 +411,8 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
           <div className="glass-panel-subtle p-3 rounded border border-slate-800 space-y-2">
             <div className="text-cyan-400 font-bold uppercase flex items-center justify-between">
               <span>1. Infinite Slope Stability (FoS)</span>
-              <span className={physics.factorOfSafety < 1.15 ? 'text-red-400 font-bold' : 'text-emerald-400'}>
-                FoS = {physics.factorOfSafety.toFixed(2)}
+              <span className={physics.factorOfSafety < 1.05 ? 'text-red-400 font-bold' : physics.factorOfSafety < 1.25 ? 'text-amber-400 font-bold' : 'text-emerald-400'}>
+                FoS = {physics.factorOfSafety.toFixed(2)} ({physics.factorOfSafety < 1.05 ? 'CRITICAL SLIP' : physics.factorOfSafety < 1.25 ? 'WATCH (MARGINAL)' : 'STABLE'})
               </span>
             </div>
             <div className="p-2 bg-[#060a12] rounded border border-slate-900 text-[11px] text-slate-300">
@@ -470,10 +470,10 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
           <div className="glass-panel-subtle p-3 rounded border border-slate-800 space-y-2">
             <div className="text-cyan-400 font-bold uppercase flex items-center justify-between">
               <span>4. Western Ghats Soil Porosity Model</span>
-              <span className="text-cyan-400 font-bold">Porosity = 0.46 m³/m³</span>
+              <span className="text-cyan-400 font-bold">Porosity = 0.52 m³/m³</span>
             </div>
             <div className="p-2 bg-[#060a12] rounded border border-slate-900 text-[11px] text-slate-300">
-              <code>Sat% = [0.15·SM_top + 0.35·SM_mid + 0.50·SM_deep] / 0.46</code>
+              <code>Sat% = [0.15·SM_top + 0.35·SM_mid + 0.50·SM_deep] / 0.52</code>
             </div>
             <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-400">
               <div>Topsoil (0-7cm): <span className="text-white">{upstream.soilMoisture0to7cm} m³/m³</span></div>
