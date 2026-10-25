@@ -32,6 +32,8 @@ export const EmergencyVoiceDispatchModal: React.FC<EmergencyVoiceDispatchModalPr
   const [isDispatching, setIsDispatching] = useState(false);
   const [dispatchReceipt, setDispatchReceipt] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(voiceDispatchEngine.getIsMuted());
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -49,15 +51,28 @@ export const EmergencyVoiceDispatchModal: React.FC<EmergencyVoiceDispatchModalPr
     voiceDispatchEngine.setMuted(nextMuted);
   };
 
-  const handleReplayVoice = () => {
+  const handleReplayVoice = async () => {
     const textToSpeak = selectedLang === 'malayalam' && alert.malayalamBroadcastMessage
       ? alert.malayalamBroadcastMessage
       : alert.broadcastMessage;
-    voiceDispatchEngine.speakAlert(textToSpeak);
+    setIsSynthesizing(true);
+    await voiceDispatchEngine.speakAlert(
+      textToSpeak,
+      () => {
+        setIsSynthesizing(false);
+        setIsPlayingAudio(true);
+      },
+      () => {
+        setIsSynthesizing(false);
+        setIsPlayingAudio(false);
+      }
+    );
   };
 
   const handleStopVoice = () => {
     voiceDispatchEngine.stopSpeaking();
+    setIsSynthesizing(false);
+    setIsPlayingAudio(false);
   };
 
   const handleCopy = (content: string) => {
@@ -156,6 +171,11 @@ export const EmergencyVoiceDispatchModal: React.FC<EmergencyVoiceDispatchModalPr
                 </button>
               </div>
 
+              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/50 text-[10px] text-cyan-300 font-mono font-bold">
+                <Radio className="w-3 h-3 text-cyan-400 animate-pulse" />
+                ELEVENLABS AI VOICE
+              </span>
+
               <button
                 onClick={handleToggleMute}
                 className="p-1.5 rounded bg-slate-800 text-slate-300 hover:text-white border border-slate-700"
@@ -166,15 +186,34 @@ export const EmergencyVoiceDispatchModal: React.FC<EmergencyVoiceDispatchModalPr
 
               <button
                 onClick={handleReplayVoice}
-                className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-bold flex items-center gap-1 shadow-sm"
+                disabled={isSynthesizing}
+                className={`px-3 py-1 rounded font-bold flex items-center gap-1.5 shadow-sm transition-all text-xs font-mono ${
+                  isPlayingAudio
+                    ? 'bg-amber-600 text-white animate-pulse'
+                    : 'bg-red-600 hover:bg-red-500 text-white'
+                }`}
               >
-                <Mic className="w-3.5 h-3.5" />
-                <span>SPEAK</span>
+                {isSynthesizing ? (
+                  <>
+                    <Zap className="w-3.5 h-3.5 animate-spin text-cyan-300" />
+                    <span>SYNTHESIZING...</span>
+                  </>
+                ) : isPlayingAudio ? (
+                  <>
+                    <Volume2 className="w-3.5 h-3.5 animate-bounce text-white" />
+                    <span>BROADCASTING...</span>
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-3.5 h-3.5" />
+                    <span>SPEAK</span>
+                  </>
+                )}
               </button>
 
               <button
                 onClick={handleStopVoice}
-                className="px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-slate-200"
+                className="px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-slate-200 text-xs font-mono"
               >
                 STOP
               </button>

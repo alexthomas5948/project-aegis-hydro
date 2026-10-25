@@ -9,6 +9,8 @@ class VoiceDispatchEngine {
   private listeners: Set<AlertListener> = new Set();
   private isMuted = false;
   private isSpeaking = false;
+  private currentAudio: HTMLAudioElement | null = null;
+  private isElevenLabsActive = true;
   private recentAnnouncedCorridors: Map<string, number> = new Map(); // corridorId -> timestamp
 
   private constructor() {
@@ -204,9 +206,63 @@ class VoiceDispatchEngine {
   }
 
   /**
-   * Speak broadcast message using Web Speech API
+   * Speak broadcast message using ElevenLabs AI Neural Voice with Web Speech fallback
    */
-  public speakAlert(text: string) {
+  public async speakAlert(text: string, onStart?: () => void, onEnd?: () => void): Promise<void> {
+    if (this.isMuted) return;
+
+    this.stopSpeaking();
+
+    // 1. Try ElevenLabs serverless AI audio stream
+    try {
+      const response = await fetch('/api/voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+
+      if (response.ok) {
+        const audioBlob = await response.blob();
+        if (audioBlob.size > 200) {
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+          this.currentAudio = audio;
+
+          audio.onplay = () => {
+            this.isSpeaking = true;
+            this.isElevenLabsActive = true;
+            if (onStart) onStart();
+          };
+
+          audio.onended = () => {
+            this.isSpeaking = false;
+            URL.revokeObjectURL(audioUrl);
+            this.currentAudio = null;
+            if (onEnd) onEnd();
+          };
+
+          audio.onerror = () => {
+            URL.revokeObjectURL(audioUrl);
+            this.currentAudio = null;
+            this.speakWebSpeechFallback(text, onStart, onEnd);
+          };
+
+          await audio.play();
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[ElevenLabs Stream Unavailable, falling back to Web Speech]', err);
+    }
+
+    // 2. Fallback: Native Web Speech API
+    this.speakWebSpeechFallback(text, onStart, onEnd);
+  }
+
+  /**
+   * Fallback Web Speech API
+   */
+  public speakWebSpeechFallback(text: string, onStart?: () => void, onEnd?: () => void) {
     if (this.isMuted) return;
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
 
@@ -218,7 +274,6 @@ class VoiceDispatchEngine {
       utterance.pitch = 0.95;
       utterance.volume = 1.0;
 
-      // Select natural English voice if available
       const voices = window.speechSynthesis.getVoices();
       const preferredVoice = voices.find(v => (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Daniel') || v.lang.startsWith('en')));
       if (preferredVoice) {
@@ -227,22 +282,37 @@ class VoiceDispatchEngine {
 
       utterance.onstart = () => {
         this.isSpeaking = true;
+        this.isElevenLabsActive = false;
+        if (onStart) onStart();
       };
       utterance.onend = () => {
         this.isSpeaking = false;
+        if (onEnd) onEnd();
       };
       utterance.onerror = () => {
         this.isSpeaking = false;
+        if (onEnd) onEnd();
       };
 
       window.speechSynthesis.speak(utterance);
     } catch (e) {
       console.warn('SpeechSynthesis error:', e);
       this.isSpeaking = false;
+      if (onEnd) onEnd();
     }
   }
 
   public stopSpeaking() {
+    if (this.currentAudio) {
+      try {
+        this.currentAudio.pause();
+        this.currentAudio.currentTime = 0;
+      } catch (e) {
+        // ignore
+      }
+      this.currentAudio = null;
+    }
+
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
