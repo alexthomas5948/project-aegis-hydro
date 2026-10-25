@@ -501,6 +501,7 @@ export const CorridorInspectorDrawer: React.FC<CorridorInspectorDrawerProps> = (
         <DamRuleCurveOptimizerPanel
           damOptimizer={physics.damOptimizer}
           corridor={corridor}
+          dri={physics.dynamicRiskIndex}
         />
       )}
 

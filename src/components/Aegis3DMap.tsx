@@ -37,8 +37,60 @@ interface Aegis3DMapProps {
   onSelectCorridor: (id: string) => void;
 }
 
-// 100% free keyless dark vector map style from OpenFreeMap (Zero watermarks, Cloudflare CDN)
-const FREE_DARK_3D_STYLE = 'https://tiles.openfreemap.org/styles/dark';
+// Guaranteed-working zero-API-key 3D Satellite Terrain + Dark Tactical Carto Hybrid Style
+const TACTICAL_SATELLITE_3D_STYLE = {
+  version: 8 as const,
+  sources: {
+    'esri-satellite': {
+      type: 'raster' as const,
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      ],
+      tileSize: 256,
+      attribution: 'Esri, Maxar, Earthstar Geographics'
+    },
+    'carto-dark-labels': {
+      type: 'raster' as const,
+      tiles: [
+        'https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png'
+      ],
+      tileSize: 256
+    },
+    'aws-terrain': {
+      type: 'raster-dem' as const,
+      tiles: [
+        'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+      ],
+      tileSize: 256,
+      encoding: 'terrarium' as const,
+      maxzoom: 14
+    }
+  },
+  terrain: {
+    source: 'aws-terrain',
+    exaggeration: 1.8
+  },
+  layers: [
+    {
+      id: 'satellite-base',
+      type: 'raster' as const,
+      source: 'esri-satellite',
+      paint: {
+        'raster-brightness-max': 0.55,
+        'raster-contrast': 0.25,
+        'raster-saturation': -0.35
+      }
+    },
+    {
+      id: 'dark-labels',
+      type: 'raster' as const,
+      source: 'carto-dark-labels',
+      paint: {
+        'raster-opacity': 0.9
+      }
+    }
+  ]
+};
 
 export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
   telemetryMap,
@@ -64,7 +116,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
 
     const map = new MapLibreMap({
       container: mapContainerRef.current,
-      style: FREE_DARK_3D_STYLE as any,
+      style: TACTICAL_SATELLITE_3D_STYLE as any,
       center: [76.55, 10.15],
       zoom: 7.8,
       pitch: 58,
@@ -74,8 +126,13 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
 
     map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
 
+    // Ensure WebGL initializes with correct dimensions 200ms after mount
+    const resizeTimer = setTimeout(() => {
+      map.resize();
+    }, 200);
+
     map.on('load', () => {
-      // 1. Add AWS Terrarium 3D DEM Source & Enable 3D Elevation
+      // 1. Ensure 3D Elevation Terrain is active
       try {
         if (!map.getSource('aws-terrain')) {
           map.addSource('aws-terrain', {
@@ -88,7 +145,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
         }
         map.setTerrain({
           source: 'aws-terrain',
-          exaggeration: 1.6
+          exaggeration: 1.8
         });
       } catch (e) {
         console.warn('MapLibre 3D terrain loading:', e);
@@ -441,6 +498,7 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
     mapRef.current = map;
 
     return () => {
+      clearTimeout(resizeTimer);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       popupRef.current?.remove();
       map.remove();
@@ -590,11 +648,21 @@ export const Aegis3DMap: React.FC<Aegis3DMapProps> = ({
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
+    setTimeout(() => {
+      mapRef.current?.resize();
+    }, 200);
   };
 
   return (
-    <div className={`relative w-full ${isFullscreen ? 'fixed inset-0 z-50 bg-[#050811]' : 'h-[540px] rounded-lg'} overflow-hidden border border-slate-800 shadow-2xl`}>
-      <div ref={mapContainerRef} className="w-full h-full" />
+    <div
+      className={`relative w-full ${isFullscreen ? 'fixed inset-0 z-50 bg-[#050811]' : 'h-[520px] rounded-lg'} overflow-hidden border border-slate-800 shadow-2xl`}
+      style={{ height: isFullscreen ? '100vh' : '520px', width: '100%' }}
+    >
+      <div
+        ref={mapContainerRef}
+        className="w-full h-full"
+        style={{ height: isFullscreen ? '100vh' : '520px', width: '100%' }}
+      />
 
       {/* Top Left: Tactical Overlay & Quick Presets */}
       <div className="absolute top-3 left-3 flex flex-col gap-2 z-10 pointer-events-auto">

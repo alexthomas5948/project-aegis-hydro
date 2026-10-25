@@ -23,16 +23,27 @@ import {
   Waves,
   Zap
 } from 'lucide-react';
+import { telemetryEngine } from '../services/keralaTelemetryEngine';
 
 interface DamRuleCurveOptimizerPanelProps {
   damOptimizer: DamSpillwayOptimizerResult;
   corridor: HydrologicalCorridor;
+  dri?: number;
+  isSimulatorEngaged?: boolean;
 }
 
 export const DamRuleCurveOptimizerPanel: React.FC<DamRuleCurveOptimizerPanelProps> = ({
   damOptimizer,
-  corridor
+  corridor,
+  dri,
+  isSimulatorEngaged
 }) => {
+  const isSimActive = isSimulatorEngaged !== undefined 
+    ? isSimulatorEngaged 
+    : telemetryEngine.getSimulationConfig().active;
+  const currentDri = dri ?? 30;
+  const isSurgeOrSimulated = currentDri >= 55 || isSimActive;
+
   return (
     <div className="glass-panel p-4 rounded-lg border border-slate-800 space-y-3 font-mono text-xs">
       {/* Header */}
@@ -51,19 +62,35 @@ export const DamRuleCurveOptimizerPanel: React.FC<DamRuleCurveOptimizerPanelProp
           </div>
         </div>
 
-        <div className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/50">
-          PROACTIVE PEAK SHAVING
+        <div className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+          isSurgeOrSimulated 
+            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 animate-pulse' 
+            : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+        }`}>
+          {isSurgeOrSimulated ? 'PROACTIVE PEAK SHAVING' : 'RESERVOIR EQUILIBRIUM NOMINAL'}
         </div>
       </div>
 
-      {/* Action Recommendation Banner */}
-      <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-500/60 flex items-start gap-2.5 text-amber-200">
-        <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
-        <div className="text-[11px] leading-relaxed">
-          <span className="font-bold uppercase text-amber-300">AEGIS RULE-CURVE DIRECTIVE: </span>
-          <span>{damOptimizer.actionRecommendation}</span>
+      {/* Dynamic Action Recommendation Banner (Calm vs Surge) */}
+      {!isSurgeOrSimulated ? (
+        <div className="p-3 rounded-lg bg-emerald-950/40 border border-emerald-500/60 flex items-start gap-2.5 text-emerald-200 shadow-sm">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+          <div className="text-[11px] leading-relaxed">
+            <span className="font-bold uppercase text-emerald-300">RESERVOIR EQUILIBRIUM NOMINAL: </span>
+            <span>
+              Cheruthoni Spillway radial shutters remain CLOSED (0cm). Reservoir operating within safe rule-curve buffer ({damOptimizer.currentLevelM}m / FRL {damOptimizer.fullReservoirLevelM}m). Below is the standby pre-release simulation curve if an upstream cloudburst is detected.
+            </span>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-500/60 flex items-start gap-2.5 text-amber-200 shadow-sm animate-pulse">
+          <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-[11px] leading-relaxed">
+            <span className="font-bold uppercase text-amber-300">AEGIS RULE-CURVE DIRECTIVE: </span>
+            <span>{damOptimizer.actionRecommendation}</span>
+          </div>
+        </div>
+      )}
 
       {/* Dam Spillway Structural KPI Ribbon */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -77,18 +104,24 @@ export const DamRuleCurveOptimizerPanel: React.FC<DamRuleCurveOptimizerPanelProp
 
         <div className="p-2.5 rounded bg-[#060a12] border border-slate-800">
           <div className="text-[10px] text-slate-400 uppercase">GATE OPENING DIRECTIVE</div>
-          <div className="text-base font-rajdhani font-bold text-amber-400 mt-0.5">
-            {damOptimizer.recommendedActiveGates} Gates @ {damOptimizer.recommendedGateOpeningHeightCm}cm
+          <div className={`text-base font-rajdhani font-bold mt-0.5 ${isSurgeOrSimulated ? 'text-amber-400' : 'text-emerald-400'}`}>
+            {isSurgeOrSimulated
+              ? `${damOptimizer.recommendedActiveGates} Gates @ ${damOptimizer.recommendedGateOpeningHeightCm}cm`
+              : '0 Gates @ 0cm (CLOSED)'}
           </div>
-          <div className="text-[9px] text-slate-500">Total Shutters: {damOptimizer.totalGates} radial</div>
+          <div className="text-[9px] text-slate-500">
+            {isSurgeOrSimulated ? `Total Shutters: ${damOptimizer.totalGates} radial` : `Standby: ${damOptimizer.recommendedActiveGates} Gates @ ${damOptimizer.recommendedGateOpeningHeightCm}cm`}
+          </div>
         </div>
 
         <div className="p-2.5 rounded bg-[#060a12] border border-slate-800">
           <div className="text-[10px] text-slate-400 uppercase">PRE-RELEASE DISCHARGE</div>
           <div className="text-base font-rajdhani font-bold text-white mt-0.5">
-            {damOptimizer.preReleaseDischargeM3s} <span className="text-[10px] text-slate-400 font-mono">m³/s</span>
+            {isSurgeOrSimulated ? damOptimizer.preReleaseDischargeM3s : 0} <span className="text-[10px] text-slate-400 font-mono">m³/s</span>
           </div>
-          <div className="text-[9px] text-slate-500">Safely below warning threshold</div>
+          <div className="text-[9px] text-slate-500">
+            {isSurgeOrSimulated ? 'Safely below warning threshold' : 'Gates closed - baseflow nominal'}
+          </div>
         </div>
 
         <div className="p-2.5 rounded bg-[#060a12] border border-slate-800">
